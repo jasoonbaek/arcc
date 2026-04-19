@@ -11,8 +11,14 @@ from functools import wraps
 
 from flask import Flask, render_template, request, jsonify, session
 
+import config
+from db import get_db
+
 app = Flask(__name__)
 app.secret_key = 'arcc-mock-dev-key'
+
+# DB 어댑터 초기화 (USE_SUPABASE에 따라 Supabase 또는 MOCK 어댑터 선택)
+db = get_db()
 
 # ============================================================
 # MOCK DATA STORE (in-memory)
@@ -154,6 +160,34 @@ def _session_with_relations(sid):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+# ---------- Supabase 연결 테스트 (Phase 2 임시, Phase 3에서 삭제) ----------
+
+@app.route('/api/supabase-test')
+def supabase_test():
+    """현재 DB 모드 + 실제 Supabase 연결 가능 여부 진단."""
+    if not config.USE_SUPABASE:
+        return jsonify({'mode': 'MOCK', 'supabase': False})
+    try:
+        from supabase import create_client
+        client = create_client(config.SUPABASE_URL, config.SUPABASE_KEY)
+        result = client.table('users').select('id, email').limit(3).execute()
+        return jsonify({
+            'mode': 'SUPABASE',
+            'supabase': True,
+            'connection': 'OK',
+            'users_count': len(result.data),
+            'sample_emails': [u.get('email', 'no-email') for u in result.data],
+        })
+    except Exception as e:
+        return jsonify({
+            'mode': 'SUPABASE',
+            'supabase': True,
+            'connection': 'FAIL',
+            'error': str(e),
+            'error_type': type(e).__name__,
+        }), 500
 
 
 # ---------- Auth ----------

@@ -18,7 +18,8 @@
       "Bash(python -c ' *)",
       "Bash(pip show *)",
       "Bash(mkdir -p \"claude-test_backup_260419_저녁\")",
-      "Bash(cp -r claude-test/. \"claude-test_backup_260419_저녁/\")"
+      "Bash(cp -r claude-test/. \"claude-test_backup_260419_저녁/\")",
+      "Bash(curl -s http://localhost:5000/api/supabase-test)"
     ]
   }
 }
