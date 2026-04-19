@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>ARCC - AI Running Coaching by Claude</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Noto+Sans+KR:wght@300;400;500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+
+<!-- ===== Screen: Login ===== -->
+<div class="screen" id="screen-login">
+  <div class="auth-container">
+    <div class="auth-logo">
+      <div class="auth-logo-main">ARCC</div>
+      <div class="auth-logo-sub">AI Running Coaching by Claude</div>
+      <div class="auth-logo-badge">&#x231A; COROS &#xB7EC;&#xB108;&#xB97C; &#xC704;&#xD55C; AI &#xB7EC;&#xB2DD; &#xCF54;&#xCE58;</div>
+    </div>
+    <form class="auth-form" id="loginForm" onsubmit="return false;">
+      <div class="form-group">
+        <label class="form-label">&#xC774;&#xBA54;&#xC77C;</label>
+        <input class="form-input" type="email" id="loginEmail" placeholder="email@example.com" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label class="form-label">&#xBE44;&#xBC00;&#xBC88;&#xD638;</label>
+        <input class="form-input" type="password" id="loginPassword" placeholder="6&#xC790; &#xC774;&#xC0C1;" autocomplete="current-password">
+      </div>
+      <div id="loginError" class="form-error" style="margin-bottom:12px;"></div>
+      <button class="btn btn-primary" id="loginBtn" onclick="Auth.login()">&#xB85C;&#xADF8;&#xC778;</button>
+      <div class="auth-switch">
+        &#xACC4;&#xC815;&#xC774; &#xC5C6;&#xC73C;&#xC2E0;&#xAC00;&#xC694;? <a onclick="App.navigate('signup')">&#xD68C;&#xC6D0;&#xAC00;&#xC785;</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===== Screen: Signup ===== -->
+<div class="screen" id="screen-signup">
+  <div class="auth-container">
+    <div class="auth-logo">
+      <div class="auth-logo-main">ARCC</div>
+      <div class="auth-logo-sub">AI Running Coaching by Claude</div>
+      <div class="auth-logo-badge">&#x231A; COROS &#xB7EC;&#xB108;&#xB97C; &#xC704;&#xD55C; AI &#xB7EC;&#xB2DD; &#xCF54;&#xCE58;</div>
+    </div>
+    <form class="auth-form" id="signupForm" onsubmit="return false;">
+      <div class="form-group">
+        <label class="form-label">&#xC774;&#xB984;</label>
+        <input class="form-input" type="text" id="signupName" placeholder="&#xD64D;&#xAE38;&#xB3D9;" autocomplete="name">
+      </div>
+      <div class="form-group">
+        <label class="form-label">&#xC774;&#xBA54;&#xC77C;</label>
+        <input class="form-input" type="email" id="signupEmail" placeholder="email@example.com" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label class="form-label">&#xBE44;&#xBC00;&#xBC88;&#xD638;</label>
+        <input class="form-input" type="password" id="signupPassword" placeholder="6&#xC790; &#xC774;&#xC0C1;" autocomplete="new-password">
+      </div>
+      <div id="signupError" class="form-error" style="margin-bottom:12px;"></div>
+      <button class="btn btn-primary" id="signupBtn" onclick="Auth.signup()">&#xD68C;&#xC6D0;&#xAC00;&#xC785;</button>
+      <div class="auth-switch">
+        &#xC774;&#xBBF8; &#xACC4;&#xC815;&#xC774; &#xC788;&#xC73C;&#xC2E0;&#xAC00;&#xC694;? <a onclick="App.navigate('login')">&#xB85C;&#xADF8;&#xC778;</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===== Screen: Disclaimer ===== -->
+<div class="screen" id="screen-disclaimer">
+  <div class="container">
+    <h2 style="margin-bottom:16px;">&#x2695;&#xFE0F; &#xC758;&#xB8CC; &#xBA74;&#xCC45; &#xB3D9;&#xC758;</h2>
+    <div class="disclaimer-content">
+      <p><strong>ARCC &#xC11C;&#xBE44;&#xC2A4; &#xC774;&#xC6A9; &#xC804; &#xBC18;&#xB4DC;&#xC2DC; &#xC77D;&#xC5B4;&#xC8FC;&#xC138;&#xC694;.</strong></p>
+      <br>
+      <p>1. ARCC&#xB294; AI &#xAE30;&#xBC18;&#xC758; &#xB7EC;&#xB2DD; &#xCF54;&#xCE6D; &#xC11C;&#xBE44;&#xC2A4;&#xC774;&#xBA70;, &#xC758;&#xB8CC; &#xC11C;&#xBE44;&#xC2A4;&#xAC00; &#xC544;&#xB2D9;&#xB2C8;&#xB2E4;.</p>
+      <p>2. &#xC81C;&#xACF5;&#xB418;&#xB294; &#xBD84;&#xC11D; &#xACB0;&#xACFC;&#xC640; &#xCF54;&#xCE6D;&#xC740; &#xCC38;&#xACE0;&#xC6A9;&#xC774;&#xBA70;, &#xC804;&#xBB38;&#xC801;&#xC778; &#xC758;&#xB8CC; &#xC870;&#xC5B8;&#xC744; &#xB300;&#xCCB4;&#xD558;&#xC9C0; &#xC54A;&#xC2B5;&#xB2C8;&#xB2E4;.</p>
+      <p>3. &#xD1B5;&#xC99D;&#xC774;&#xB098; &#xBD80;&#xC0C1;&#xC774; &#xC788;&#xC744; &#xACBD;&#xC6B0; &#xBC18;&#xB4DC;&#xC2DC; &#xC804;&#xBB38; &#xC758;&#xB8CC;&#xC9C4;&#xC758; &#xC9C4;&#xB2E8;&#xC744; &#xBC1B;&#xC73C;&#xC138;&#xC694;.</p>
+      <p>4. AI &#xCF54;&#xCE6D; &#xACB0;&#xACFC;&#xC5D0; &#xB530;&#xB978; &#xD6C8;&#xB828;&#xC740; &#xC0AC;&#xC6A9;&#xC790; &#xBCF8;&#xC778;&#xC758; &#xCC45;&#xC784; &#xD558;&#xC5D0; &#xC2E4;&#xC2DC;&#xD558;&#xC2DC;&#xAE30; &#xBC14;&#xB78D;&#xB2C8;&#xB2E4;.</p>
+      <p>5. &#xC2EC;&#xBC15;&#xC218;, &#xD398;&#xC774;&#xC2A4; &#xB4F1;&#xC758; &#xB370;&#xC774;&#xD130;&#xB294; COROS &#xC6CC;&#xCE58;&#xC758; &#xCE21;&#xC815;&#xAC12;&#xC774;&#xBA70;, &#xC815;&#xD655;&#xC131;&#xC744; &#xBCF4;&#xC7A5;&#xD558;&#xC9C0; &#xC54A;&#xC2B5;&#xB2C8;&#xB2E4;.</p>
+    </div>
+    <label class="disclaimer-check">
+      <input type="checkbox" id="disclaimerCheck">
+      &#xC704; &#xB0B4;&#xC6A9;&#xC744; &#xC774;&#xD574;&#xD588;&#xC73C;&#xBA70; &#xB3D9;&#xC758;&#xD569;&#xB2C8;&#xB2E4;
+    </label>
+    <button class="btn btn-primary" id="disclaimerBtn" onclick="Onboarding.agreeDisclaimer()">&#xB3D9;&#xC758;&#xD558;&#xACE0; &#xACC4;&#xC18D;&#xD558;&#xAE30;</button>
+  </div>
+</div>
+
+<!-- ===== Screen: Experience Choice ===== -->
+<div class="screen" id="screen-experience">
+  <div class="experience-container">
+    <div style="font-size:48px;margin-bottom:16px;">&#x1F3C3;</div>
+    <div class="experience-title">AI &#xB7EC;&#xB2DD; &#xCF54;&#xCE58;&#xB97C; &#xCCB4;&#xD5D8;&#xD574;&#xBCF4;&#xC138;&#xC694;!</div>
+    <div class="experience-desc">
+      COROS &#xB7EC;&#xB2DD; &#xB370;&#xC774;&#xD130;&#xB97C; &#xBD84;&#xC11D;&#xD558;&#xACE0;<br>
+      &#xB9DE;&#xCDA4; &#xCF54;&#xCE6D;&#xC744; &#xBC1B;&#xC544;&#xBCF4;&#xC138;&#xC694;
+    </div>
+    <button class="btn btn-primary" onclick="Sample.runSample()" style="margin-bottom:12px;">
+      &#x1F4CA; &#xC0D8;&#xD50C; &#xB370;&#xC774;&#xD130;&#xB85C; &#xCCB4;&#xD5D8;&#xD558;&#xAE30;
+    </button>
+    <div class="experience-or">&#xB610;&#xB294;</div>
+    <button class="btn btn-secondary" onclick="App.navigate('upload')">
+      &#x1F4C1; &#xB0B4; COROS &#xB370;&#xC774;&#xD130; &#xC5C5;&#xB85C;&#xB4DC;
+    </button>
+  </div>
+</div>
+
+<!-- ===== Screen: Dashboard ===== -->
+<div class="screen" id="screen-dashboard">
+  <div class="container">
+    <!-- Greeting -->
+    <div class="greeting-section">
+      <div class="greeting-name">&#x1F3C3; &#xC548;&#xB155;&#xD558;&#xC138;&#xC694;, <span id="dashName">&#xB7EC;&#xB108;</span>&#xB2D8;!</div>
+      <div class="greeting-badge">&#x231A; COROS &#xB7EC;&#xB108;</div>
+    </div>
+
+    <!-- Weekly summary -->
+    <div class="card">
+      <div class="card-title">&#x1F4CA; &#xC774;&#xBC88; &#xC8FC; &#xB7EC;&#xB2DD;</div>
+      <div class="weekly-summary">
+        <div class="weekly-stat">
+          <div class="weekly-stat-value" id="dashRuns">0</div>
+          <div class="weekly-stat-label">/ <span id="dashTarget">3</span>&#xD68C;</div>
+        </div>
+        <div class="weekly-stat">
+          <div class="weekly-stat-value" id="dashDistance">0</div>
+          <div class="weekly-stat-label">km &#xCD1D; &#xAC70;&#xB9AC;</div>
+        </div>
+        <div class="weekly-stat">
+          <div class="weekly-stat-value" id="dashDuration">0:00</div>
+          <div class="weekly-stat-label">&#xCD1D; &#xC2DC;&#xAC04;</div>
+        </div>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="dashProgress" style="width:0%"></div></div>
+      <div class="progress-text" id="dashProgressText">0% &#xB2EC;&#xC131;</div>
+    </div>
+
+    <!-- Today's condition -->
+    <div class="card" id="dashConditionCard" style="display:none;">
+      <div class="card-title">&#x1F4AA; &#xC624;&#xB298;&#xC758; &#xCEE8;&#xB514;&#xC158;</div>
+      <div id="dashCondition"></div>
+    </div>
+
+    <!-- AI Recommendation -->
+    <div class="card" id="dashRecommendCard" style="display:none;">
+      <div class="card-title">&#x1F3AF; &#xB2E4;&#xC74C; &#xD6C8;&#xB828; &#xCD94;&#xCC9C;</div>
+      <div id="dashRecommend"></div>
+    </div>
+
+    <!-- Recent Runs -->
+    <div class="card">
+      <div class="card-title">&#x1F4CB; &#xCD5C;&#xADFC; &#xB7EC;&#xB2DD;</div>
+      <div id="dashRecent">
+        <div class="empty-state">
+          <div class="empty-state-icon">&#x1F3C3;</div>
+          <div class="empty-state-text">&#xC544;&#xC9C1; &#xB7EC;&#xB2DD; &#xAE30;&#xB85D;&#xC774; &#xC5C6;&#xC5B4;&#xC694;.<br>CSV&#xB97C; &#xC5C5;&#xB85C;&#xB4DC;&#xD574;&#xBCF4;&#xC138;&#xC694;!</div>
+        </div>
+      </div>
+      <div class="more-link" onclick="App.navigate('history')" style="display:none;" id="dashMoreLink">&#xB354;&#xBCF4;&#xAE30; &gt;</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Screen: Upload ===== -->
+<div class="screen" id="screen-upload">
+  <div class="container">
+    <h2 style="margin-bottom:4px;">&#x1F4C1; COROS &#xB7EC;&#xB2DD; &#xB370;&#xC774;&#xD130; &#xC5C5;&#xB85C;&#xB4DC;</h2>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">COROS &#xC571;&#xC5D0;&#xC11C; &#xB0B4;&#xBCF4;&#xB0B8; CSV &#xD30C;&#xC77C;&#xC744; &#xC5C5;&#xB85C;&#xB4DC;&#xD574;&#xC8FC;&#xC138;&#xC694;.</p>
+
+    <div id="uploadProfileBanner" style="display:none;background:rgba(255,193,7,0.1);border:1px solid rgba(255,193,7,0.4);border-radius:10px;padding:12px;margin-bottom:16px;font-size:13px;">
+      &#x1F4A1; <strong>&#xC2E0;&#xCCB4;&#xC815;&#xBCF4;&#xB97C; &#xC785;&#xB825;&#xD558;&#xBA74; &#xB354; &#xC815;&#xD655;&#xD574;&#xC694;</strong><br>
+      <span style="color:var(--muted);">&#xB098;&#xC774;&#xB9C8;&#xB2E4; &#xC2EC;&#xBC15;&#xC874; &#xACC4;&#xC0B0;&#xACFC; &#xCE7C;&#xB85C;&#xB9AC; &#xC870;&#xC815;&#xC774; &#xAC1C;&#xC778;&#xD654;&#xB429;&#xB2C8;&#xB2E4;.</span>
+      <button class="btn btn-secondary btn-sm" style="margin-top:8px;" onclick="App.navigate('profile')">&#xC2E0;&#xCCB4;&#xC815;&#xBCF4; &#xC785;&#xB825;&#xD558;&#xAE30;</button>
+    </div>
+
+    <div class="upload-area" id="uploadArea" onclick="document.getElementById('csvInput').click()">
+      <div class="upload-icon">&#x1F4E4;</div>
+      <div class="upload-title">&#xD30C;&#xC77C; &#xC120;&#xD0DD;</div>
+      <div class="upload-desc">CSV &#xD30C;&#xC77C;&#xC744; &#xD0ED;&#xD558;&#xAC70;&#xB098; &#xB4DC;&#xB798;&#xADF8;&#xD558;&#xC138;&#xC694;</div>
+    </div>
+    <input type="file" id="csvInput" accept=".csv, text/csv, text/plain, application/vnd.ms-excel, .txt" style="display:none">
+
+    <div class="upload-loading" id="uploadLoading">
+      <div class="spinner"></div>
+      <div id="uploadStatus">&#xD30C;&#xC77C; &#xBD84;&#xC11D; &#xC911;...</div>
+    </div>
+
+    <div class="upload-hint">
+      &#x1F4A1; <strong>CSV &#xB0B4;&#xBCF4;&#xB0B4;&#xAE30; &#xBC29;&#xBC95;:</strong><br>
+      COROS &#xC571; &gt; &#xD65C;&#xB3D9; &gt; &#xACF5;&#xC720; &gt; CSV &#xC800;&#xC7A5;
+    </div>
+  </div>
+</div>
+
+<!-- ===== Screen: Analysis Result ===== -->
+<div class="screen" id="screen-analysis">
+  <div class="container" id="analysisContent"></div>
+</div>
+
+<!-- ===== Screen: History ===== -->
+<div class="screen" id="screen-history">
+  <div class="container">
+    <h2 style="margin-bottom:16px;">&#x1F4CB; &#xB7EC;&#xB2DD; &#xAE30;&#xB85D;</h2>
+    <div class="filter-bar">
+      <button class="filter-btn" data-filter="this_month" onclick="History.setFilter('this_month')">&#xC774;&#xBC88; &#xB2EC;</button>
+      <button class="filter-btn" data-filter="last_month" onclick="History.setFilter('last_month')">&#xC9C0;&#xB09C; &#xB2EC;</button>
+      <button class="filter-btn active" data-filter="all" onclick="History.setFilter('all')">&#xC804;&#xCCB4;</button>
+    </div>
+    <div id="historyList"></div>
+  </div>
+</div>
+
+<!-- ===== Screen: MyPage ===== -->
+<div class="screen" id="screen-mypage">
+  <div class="container">
+    <div class="mypage-header">
+      <div class="mypage-avatar">&#x1F3C3;</div>
+      <div class="mypage-name" id="mypageName">-</div>
+      <div class="mypage-email" id="mypageEmail">-</div>
+      <div class="greeting-badge" style="margin-top:8px;">&#x231A; COROS &#xB7EC;&#xB108;</div>
+    </div>
+
+    <div class="mypage-menu-item" onclick="MyPage.showGoals()">
+      <div class="mypage-menu-left"><span class="mypage-menu-icon">&#x1F3AF;</span> &#xBAA9;&#xD45C; &#xC124;&#xC815;</div>
+      <span class="mypage-menu-arrow">&gt;</span>
+    </div>
+    <div class="mypage-menu-item" onclick="MyPage.showProfile()">
+      <div class="mypage-menu-left"><span class="mypage-menu-icon">&#x1F4DD;</span> &#xC2E0;&#xCCB4; &#xC815;&#xBCF4;</div>
+      <span class="mypage-menu-arrow">&gt;</span>
+    </div>
+    <div class="mypage-menu-item" onclick="Auth.logout()" style="margin-top:24px;border-color:rgba(255,77,109,0.2);">
+      <div class="mypage-menu-left"><span class="mypage-menu-icon">&#x1F6AA;</span> <span style="color:var(--accent2)">&#xB85C;&#xADF8;&#xC544;&#xC6C3;</span></div>
+      <span class="mypage-menu-arrow">&gt;</span>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Screen: Goals Setting ===== -->
+<div class="screen" id="screen-goals">
+  <div class="container">
+    <h2 style="margin-bottom:16px;">&#x1F3AF; &#xC5B4;&#xB5A4; &#xC885;&#xBAA9; &#xAE30;&#xB85D;&#xC744; &#xD5A5;&#xC0C1;&#xC2DC;&#xD0AC;&#xAE4C;&#xC694;?</h2>
+
+    <div class="goal-option" data-event="10K" onclick="Goals.selectEvent('10K')">
+      <div class="goal-radio"></div>
+      <div><div class="goal-text">10K (10km)</div></div>
+    </div>
+    <div class="goal-option selected" data-event="half" onclick="Goals.selectEvent('half')">
+      <div class="goal-radio"></div>
+      <div><div class="goal-text">Half (&#xD558;&#xD504;&#xB9C8;&#xB77C;&#xD1A4;, 21.0975km)</div></div>
+    </div>
+    <div class="goal-option" data-event="full" onclick="Goals.selectEvent('full')">
+      <div class="goal-radio"></div>
+      <div><div class="goal-text">Full (&#xD480;&#xB9C8;&#xB77C;&#xD1A4;, 42.195km)</div></div>
+    </div>
+
+    <div style="margin-top:20px;">
+      <label class="form-label">&#x1F3AF; &#xBAA9;&#xD45C; &#xAE30;&#xB85D; (&#xC120;&#xD0DD;)</label>
+      <div class="time-inputs">
+        <input class="time-input" type="number" id="goalHour" placeholder="&#xC2DC;" min="0" max="9">
+        <span class="time-sep">:</span>
+        <input class="time-input" type="number" id="goalMin" placeholder="&#xBD84;" min="0" max="59">
+        <span class="time-sep">:</span>
+        <input class="time-input" type="number" id="goalSec" placeholder="&#xCD08;" min="0" max="59">
+      </div>
+    </div>
+
+    <div style="margin-top:16px;">
+      <label class="form-label">&#x1F4C5; &#xC8FC;&#xAC04; &#xD6C8;&#xB828; &#xD69F;&#xC218;</label>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <input class="form-input" type="number" id="goalWeekly" value="3" min="1" max="7" style="width:80px;text-align:center;">
+        <span style="color:var(--muted);font-size:14px;">&#xD68C;/&#xC8FC;</span>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" onclick="Goals.save()" style="margin-top:24px;">&#xC800;&#xC7A5;</button>
+  </div>
+</div>
+
+<!-- ===== Screen: Profile ===== -->
+<div class="screen" id="screen-profile">
+  <div class="container">
+    <h2 style="margin-bottom:16px;">&#x1F4DD; &#xC2E0;&#xCCB4; &#xC815;&#xBCF4;</h2>
+    <div class="form-group">
+      <label class="form-label">&#xC0DD;&#xB144;&#xC6D4;&#xC77C;</label>
+      <input class="form-input" type="date" id="profileBirthDate">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px;">&#xB098;&#xC774;&#xB294; &#xC790;&#xB3D9; &#xACC4;&#xC0B0;&#xB429;&#xB2C8;&#xB2E4;</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">&#xC131;&#xBCC4;</label>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+          <input type="radio" name="profileGender" value="male"> &#xB0A8;&#xC131;
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+          <input type="radio" name="profileGender" value="female"> &#xC5EC;&#xC131;
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+          <input type="radio" name="profileGender" value="" checked> &#xC120;&#xD0DD; &#xC548;&#xD568;
+        </label>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px;">&#xC5EC;&#xC131;&#xACFC; &#xB0A8;&#xC131;&#xC758; &#xCD5C;&#xB300;&#xC2EC;&#xBC15; &#xACF5;&#xC2DD;&#xC774; &#xB2EC;&#xB77C; &#xC815;&#xD655;&#xD55C; &#xBD84;&#xC11D;&#xC5D0; &#xB3C4;&#xC6C0;&#xB429;&#xB2C8;&#xB2E4;</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">&#xD0A4; (cm)</label>
+      <input class="form-input" type="number" id="profileHeight" placeholder="175" step="0.1">
+    </div>
+    <div class="form-group">
+      <label class="form-label">&#xCCB4;&#xC911; (kg)</label>
+      <input class="form-input" type="number" id="profileWeight" placeholder="70" step="0.1">
+    </div>
+    <div class="form-group">
+      <label class="form-label">&#xC548;&#xC815;&#xC2DC; &#xC2EC;&#xBC15;&#xC218; (bpm)</label>
+      <input class="form-input" type="number" id="profileRestHR" placeholder="60">
+    </div>
+    <div class="form-group">
+      <label class="form-label">&#xCD5C;&#xB300; &#xC2EC;&#xBC15;&#xC218; (bpm)</label>
+      <input class="form-input" type="number" id="profileMaxHR" placeholder="190">
+    </div>
+    <div class="form-group">
+      <label class="form-label">&#xBD80;&#xC0C1; &#xC774;&#xB825;</label>
+      <textarea class="form-input" id="profileInjury" rows="3" placeholder="&#xC608;: 2024&#xB144; &#xC624;&#xB978;&#xCABD; &#xBC1C;&#xBAA9; &#xC5FC;&#xC88C;"></textarea>
+    </div>
+    <button class="btn btn-primary" onclick="Profile.save()">&#xC800;&#xC7A5;</button>
+  </div>
+</div>
+
+<!-- ===== Tab Bar ===== -->
+<nav class="tab-bar" id="tabBar">
+  <div class="tab-item active" data-tab="dashboard" onclick="App.navigate('dashboard')">
+    <span class="tab-icon">&#x1F3E0;</span>
+    <span class="tab-label">&#xD648;</span>
+  </div>
+  <div class="tab-item" data-tab="history" onclick="App.navigate('history')">
+    <span class="tab-icon">&#x1F4CB;</span>
+    <span class="tab-label">&#xAE30;&#xB85D;</span>
+  </div>
+  <div class="tab-item" data-tab="upload" onclick="App.navigate('upload')">
+    <span class="tab-icon">&#x2795;</span>
+    <span class="tab-label">&#xC0C8;&#xBD84;&#xC11D;</span>
+  </div>
+  <div class="tab-item" data-tab="mypage" onclick="App.navigate('mypage')">
+    <span class="tab-icon">&#x1F464;</span>
+    <span class="tab-label">&#xB9C8;&#xC774;</span>
+  </div>
+</nav>
+
+<!-- ===== Modal ===== -->
+<div class="modal-overlay" id="modalOverlay" onclick="Modal.close(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title" id="modalTitle"></div>
+      <button class="modal-close" onclick="Modal.close()">&#xD7;</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<!-- ===== Toast ===== -->
+<div class="toast" id="toast"></div>
+
+<!-- ===== Scripts ===== -->
+<script src="/static/js/app.js"></script>
+<script src="/static/js/auth.js"></script>
+<script src="/static/js/dashboard.js"></script>
+<script src="/static/js/upload.js"></script>
+<script src="/static/js/history.js"></script>
+<script src="/static/js/mypage.js"></script>
+<script src="/static/js/sample.js"></script>
+<script src="/static/js/metrics-popup.js"></script>
+
+</body>
+</html>

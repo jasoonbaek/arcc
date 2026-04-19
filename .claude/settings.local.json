@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E '\\\\.\\(js|html|css|py|json|sql\\)$')",
+      "Bash(iconv -f CP949 -t UTF-8 \"/c/Users/백재순/OneDrive/claude-test/phase1/CLAUDE.md\")",
+      "Bash(ls -lh \"/c/Users/백재순/OneDrive/claude-test/phase1/\"*.pdf)",
+      "Bash(wc -l main.py config.py requirements.txt harness/*.py static/css/app.css static/js/*.js templates/index.html supabase_schema.sql .replit)",
+      "Bash(pip install:*)",
+      "Bash(python main.py)",
+      "Bash(curl -s http://localhost:5000/)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(pkill -f \"python main.py\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5000/)",
+      "Bash(taskkill //F //IM python.exe)",
+      "Bash(exit 0)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:5000/)",
+      "Bash(python tools/preview_prompt.py)",
+      "Bash(python -c ' *)",
+      "Bash(pip show *)",
+      "Bash(mkdir -p \"claude-test_backup_260419_저녁\")",
+      "Bash(cp -r claude-test/. \"claude-test_backup_260419_저녁/\")"
+    ]
+  }
+}
