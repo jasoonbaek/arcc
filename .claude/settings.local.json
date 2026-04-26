@@ -19,7 +19,10 @@
       "Bash(pip show *)",
       "Bash(mkdir -p \"claude-test_backup_260419_저녁\")",
       "Bash(cp -r claude-test/. \"claude-test_backup_260419_저녁/\")",
-      "Bash(curl -s http://localhost:5000/api/supabase-test)"
+      "Bash(curl -s http://localhost:5000/api/supabase-test)",
+      "Bash(curl -s -o /dev/null -w \"  GET / → HTTP %{http_code}\\\\n\" http://localhost:5000/)",
+      "Bash(git add *)",
+      "Bash(git -c user.email=\"jason@arcc.local\" -c user.name=\"Jason\" commit -m \"Phase 3-0 complete: schema migration + safe mode\")"
     ]
   }
 }

@@ -21,6 +21,13 @@ def get_db():
     if _instance is not None:
         return _instance
 
+    # 안전 모드: 강제로 MOCK 폴백 (USE_SUPABASE보다 우선)
+    if config.ROLLBACK_TO_MOCK:
+        from .mock_adapter import MockAdapter
+        _instance = MockAdapter()
+        print('[DB] Mode: MOCK (FORCED by ROLLBACK_TO_MOCK)')
+        return _instance
+
     if config.USE_SUPABASE:
         from .supabase_adapter import SupabaseAdapter
         _instance = SupabaseAdapter(config.SUPABASE_URL, config.SUPABASE_KEY)
