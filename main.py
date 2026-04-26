@@ -15,7 +15,7 @@ import config
 from db import get_db
 
 app = Flask(__name__)
-app.secret_key = 'arcc-mock-dev-key'
+app.secret_key = config.SECRET_KEY
 
 # DB 어댑터 초기화 (USE_SUPABASE에 따라 Supabase 또는 MOCK 어댑터 선택)
 db = get_db()
@@ -194,6 +194,10 @@ def supabase_test():
 
 @app.route('/api/auth/signup', methods=['POST'])
 def signup():
+    """Phase 3-1: Supabase Auth 기반 가입.
+    - db.auth.sign_up() → auth.users 생성 → 트리거가 public.users 자동 동기화
+    - 비번은 Supabase가 bcrypt로 처리 (SHA256 폐기)
+    """
     data = request.json or {}
     email = data.get('email', '').strip()
     password = data.get('password', '').strip()
@@ -204,29 +208,41 @@ def signup():
     if len(password) < 6:
         return jsonify({'error': '비밀번호는 6자 이상이어야 합니다'}), 400
 
-    for u in MOCK['users'].values():
-        if u['email'] == email:
+    try:
+        resp = db.auth.sign_up({
+            'email': email,
+            'password': password,
+            'options': {'data': {'name': name}},
+        })
+    except Exception as e:
+        msg = str(e)
+        print(f'[AUTH/SIGNUP] error: {type(e).__name__}: {msg}')
+        if 'already' in msg.lower() or 'registered' in msg.lower():
             return jsonify({'error': '이미 가입된 이메일입니다'}), 400
+        return jsonify({'error': f'가입 실패: {msg}'}), 400
 
-    uid = MOCK['next_user_id']
-    MOCK['next_user_id'] += 1
-    MOCK['users'][uid] = {
-        'id': uid, 'email': email, 'name': name,
-        'password_hash': hashlib.sha256(password.encode()).hexdigest()
-    }
-    # Defensive: ensure no stale profile/goals/disclaimer for this new user_id
-    MOCK['profiles'].pop(uid, None)
-    MOCK['goals'].pop(uid, None)
-    MOCK['disclaimers'].pop(uid, None)
+    if not resp.user:
+        return jsonify({'error': '가입 실패: 사용자 정보가 반환되지 않았습니다'}), 500
+
+    uid = resp.user.id  # UUID 문자열
+    access_token = resp.session.access_token if resp.session else None
 
     session['user_id'] = uid
     session['user_name'] = name
     session['user_email'] = email
+    if access_token:
+        session['access_token'] = access_token
+
+    print(f'[AUTH/SIGNUP] uid={uid} email={email} session_token={"yes" if access_token else "no(email_confirm_required?)"}')
     return jsonify({'user': {'id': uid, 'name': name, 'email': email}})
 
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
+    """Phase 3-1: Supabase Auth 기반 로그인.
+    - db.auth.sign_in_with_password() → access_token 발급
+    - has_disclaimer/has_goals는 Phase 3-2 전까지 MOCK 그대로 (전환 예정)
+    """
     data = request.json or {}
     email = data.get('email', '').strip()
     password = data.get('password', '').strip()
@@ -234,29 +250,44 @@ def login():
     if not email or not password:
         return jsonify({'error': '이메일과 비밀번호를 입력해주세요'}), 400
 
-    pw_hash = hashlib.sha256(password.encode()).hexdigest()
-    user = None
-    for u in MOCK['users'].values():
-        if u['email'] == email and u['password_hash'] == pw_hash:
-            user = u
-            break
-
-    if not user:
+    try:
+        resp = db.auth.sign_in_with_password({'email': email, 'password': password})
+    except Exception as e:
+        print(f'[AUTH/LOGIN] failed for {email}: {type(e).__name__}: {e}')
         return jsonify({'error': '이메일 또는 비밀번호가 올바르지 않습니다'}), 401
 
-    session['user_id'] = user['id']
-    session['user_name'] = user['name']
-    session['user_email'] = user['email']
+    if not resp.user or not resp.session:
+        return jsonify({'error': '이메일 또는 비밀번호가 올바르지 않습니다'}), 401
 
+    uid = resp.user.id  # UUID
+    # 이름은 raw_user_meta_data에 저장됨 (Supabase Auth 표준)
+    meta = getattr(resp.user, 'user_metadata', None) or {}
+    name = meta.get('name') or email.split('@')[0]
+
+    session['user_id'] = uid
+    session['user_name'] = name
+    session['user_email'] = email
+    session['access_token'] = resp.session.access_token
+
+    print(f'[AUTH/LOGIN] uid={uid} email={email}')
+
+    # Phase 3-1 단계: has_disclaimer/has_goals 는 MOCK 그대로 (Phase 3-2에서 전환)
+    # Supabase Auth UID(UUID)는 MOCK dict 키와 다르므로 항상 False가 됨 → 신규 사용자처럼 온보딩 필요
     return jsonify({
-        'user': {'id': user['id'], 'name': user['name'], 'email': user['email']},
-        'has_disclaimer': user['id'] in MOCK['disclaimers'],
-        'has_goals': user['id'] in MOCK['goals']
+        'user': {'id': uid, 'name': name, 'email': email},
+        'has_disclaimer': uid in MOCK['disclaimers'],
+        'has_goals': uid in MOCK['goals'],
     })
 
 
 @app.route('/api/auth/logout', methods=['POST'])
 def logout():
+    """Phase 3-1: Supabase Auth 토큰 무효화 + Flask 세션 비움."""
+    try:
+        db.auth.sign_out()
+    except Exception as e:
+        # Supabase 측 토큰 만료/네트워크 실패해도 로컬 세션은 반드시 비워야 함
+        print(f'[AUTH/LOGOUT] sign_out warning (ignored): {type(e).__name__}: {e}')
     session.clear()
     return jsonify({'ok': True})
 
