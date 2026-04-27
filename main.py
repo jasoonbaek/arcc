@@ -142,6 +142,47 @@ def login_required(f):
     return decorated
 
 
+def _authed_db():
+    """현재 요청의 access_token을 주입한 DB 어댑터 반환.
+
+    Phase 3-2 핵심: RLS 정책 (auth.uid() = id) 통과를 위해
+    매 요청마다 사용자의 JWT를 PostgREST에 전달해야 함.
+    토큰이 없으면 anon 그대로 — RLS가 차단할 것.
+    """
+    token = session.get('access_token')
+    return db.with_auth(token) if token else db
+
+
+def _hms_to_seconds(s):
+    """'HH:MM:SS' 또는 'MM:SS' → 정수 초. None/빈값/잘못된 형식은 None."""
+    if not s:
+        return None
+    try:
+        parts = [int(p) for p in str(s).split(':')]
+    except (ValueError, TypeError):
+        return None
+    if len(parts) == 3:
+        h, m, sec = parts
+    elif len(parts) == 2:
+        h, m, sec = 0, parts[0], parts[1]
+    else:
+        return None
+    return h * 3600 + m * 60 + sec
+
+
+def _seconds_to_hms(n):
+    """정수 초 → 'H:MM:SS'. None은 None."""
+    if n is None:
+        return None
+    try:
+        n = int(n)
+    except (ValueError, TypeError):
+        return None
+    h, rem = divmod(n, 3600)
+    m, s = divmod(rem, 60)
+    return f'{h}:{m:02d}:{s:02d}'
+
+
 def _session_with_relations(sid):
     """세션 + metrics + feedbacks + splits 결합"""
     s = copy.deepcopy(MOCK['sessions'].get(sid))
@@ -188,6 +229,41 @@ def supabase_test():
             'error': str(e),
             'error_type': type(e).__name__,
         }), 500
+
+
+@app.route('/api/auth-test')
+@login_required
+def auth_test():
+    """Phase 3-2 진단: access_token이 PostgREST에 주입되어 RLS 통과하는지 검증.
+
+    로그인 상태에서 호출 → 본인 row 조회 → 1건 나와야 정상.
+    Phase 3-7에서 제거 예정.
+    """
+    uid = session['user_id']
+    has_token = bool(session.get('access_token'))
+
+    # (1) anon으로 조회 — RLS가 차단해서 0건 또는 None 나와야 정상
+    try:
+        anon_res = db.table('users').select('id, email').eq('id', uid).execute()
+        anon_count = len(anon_res.data) if anon_res.data else 0
+    except Exception as e:
+        anon_count = f'ERR: {type(e).__name__}'
+
+    # (2) authed로 조회 — 본인 row 1건 나와야 정상
+    try:
+        authed = _authed_db()
+        authed_res = authed.table('users').select('id, email, name').eq('id', uid).single().execute()
+        authed_data = authed_res.data
+    except Exception as e:
+        authed_data = f'ERR: {type(e).__name__}: {str(e)[:200]}'
+
+    return jsonify({
+        'session_user_id': uid,
+        'has_access_token': has_token,
+        'anon_select_count': anon_count,  # 기대: 0 (RLS 차단)
+        'authed_select': authed_data,     # 기대: {id, email, name}
+        'verdict': 'OK' if isinstance(authed_data, dict) and authed_data.get('id') == uid else 'FAIL',
+    })
 
 
 # ---------- Auth ----------
@@ -271,12 +347,23 @@ def login():
 
     print(f'[AUTH/LOGIN] uid={uid} email={email}')
 
-    # Phase 3-1 단계: has_disclaimer/has_goals 는 MOCK 그대로 (Phase 3-2에서 전환)
-    # Supabase Auth UID(UUID)는 MOCK dict 키와 다르므로 항상 False가 됨 → 신규 사용자처럼 온보딩 필요
+    # Phase 3-2: has_disclaimer/has_goals 를 실 DB(users 테이블)에서 판정
+    has_disclaimer = False
+    has_goals = False
+    try:
+        u_res = db.with_auth(resp.session.access_token).table('users').select(
+            'disclaimer_agreed_at, goal'
+        ).eq('id', uid).single().execute()
+        if u_res.data:
+            has_disclaimer = bool(u_res.data.get('disclaimer_agreed_at'))
+            has_goals = bool(u_res.data.get('goal'))
+    except Exception as e:
+        print(f'[AUTH/LOGIN] onboarding flags fetch warning: {type(e).__name__}: {e}')
+
     return jsonify({
         'user': {'id': uid, 'name': name, 'email': email},
-        'has_disclaimer': uid in MOCK['disclaimers'],
-        'has_goals': uid in MOCK['goals'],
+        'has_disclaimer': has_disclaimer,
+        'has_goals': has_goals,
     })
 
 
@@ -310,29 +397,62 @@ def auth_me():
 @app.route('/api/disclaimer', methods=['POST'])
 @login_required
 def save_disclaimer():
-    MOCK['disclaimers'][session['user_id']] = True
-    return jsonify({'ok': True})
+    """Phase 3-2: 의료 면책 동의 시각을 users.disclaimer_agreed_at 에 기록."""
+    uid = session['user_id']
+    try:
+        _authed_db().table('users').update({
+            'disclaimer_agreed_at': datetime.now().isoformat()
+        }).eq('id', uid).execute()
+        return jsonify({'ok': True})
+    except Exception as e:
+        print(f'[DISCLAIMER] save error: {type(e).__name__}: {e}')
+        return jsonify({'error': '면책 동의 저장 실패'}), 500
 
 
 @app.route('/api/goals', methods=['GET'])
 @login_required
 def get_goals():
-    g = MOCK['goals'].get(session['user_id'])
-    return jsonify({'goals': g})
+    """Phase 3-2: users 테이블에서 goal/goal_target_time/weekly_runs 조회.
+    응답 키는 클라이언트 호환 위해 target_event/target_time/weekly_count 유지."""
+    uid = session['user_id']
+    try:
+        res = _authed_db().table('users').select(
+            'goal, goal_target_time, weekly_runs'
+        ).eq('id', uid).single().execute()
+    except Exception as e:
+        print(f'[GOALS/GET] error: {type(e).__name__}: {e}')
+        return jsonify({'goals': None})
+
+    row = res.data or {}
+    if not row.get('goal'):
+        return jsonify({'goals': None})
+
+    return jsonify({'goals': {
+        'user_id': uid,
+        'purpose': 'record',
+        'target_event': row.get('goal'),
+        'target_time': _seconds_to_hms(row.get('goal_target_time')),  # INT(초) → 'H:MM:SS'
+        'weekly_count': row.get('weekly_runs') or 3,
+    }})
 
 
 @app.route('/api/goals', methods=['POST'])
 @login_required
 def save_goals():
+    """Phase 3-2: 클라이언트 키(target_event/target_time/weekly_count)를
+    DB 컬럼(goal/goal_target_time/weekly_runs)으로 매핑해서 UPDATE."""
     data = request.json or {}
-    MOCK['goals'][session['user_id']] = {
-        'user_id': session['user_id'],
-        'purpose': 'record',
-        'target_event': data.get('target_event', 'half'),
-        'target_time': data.get('target_time'),
-        'weekly_count': data.get('weekly_count', 3)
-    }
-    return jsonify({'ok': True})
+    uid = session['user_id']
+    try:
+        _authed_db().table('users').update({
+            'goal': data.get('target_event', 'half'),
+            'goal_target_time': _hms_to_seconds(data.get('target_time')),  # 'H:MM:SS' → INT(초)
+            'weekly_runs': int(data.get('weekly_count') or 3),
+        }).eq('id', uid).execute()
+        return jsonify({'ok': True})
+    except Exception as e:
+        print(f'[GOALS/SAVE] error: {type(e).__name__}: {e}')
+        return jsonify({'error': '목표 저장 실패'}), 500
 
 
 # ---------- Profile ----------
@@ -340,27 +460,92 @@ def save_goals():
 @app.route('/api/profile', methods=['GET'])
 @login_required
 def get_profile():
-    p = MOCK['profiles'].get(session['user_id'])
-    return jsonify({'profile': p})
+    """Phase 3-2: users 컬럼들 + health_records 최신 resting_hr 결합."""
+    uid = session['user_id']
+    authed = _authed_db()
+
+    # (1) users 본인 row
+    try:
+        u_res = authed.table('users').select(
+            'birth_date, gender, height, weight, max_hr, injury_history'
+        ).eq('id', uid).single().execute()
+        u = u_res.data
+    except Exception as e:
+        print(f'[PROFILE/GET] users error: {type(e).__name__}: {e}')
+        return jsonify({'profile': None})
+
+    if not u:
+        return jsonify({'profile': None})
+
+    # (2) health_records 최신 row → resting_hr
+    resting_hr = None
+    try:
+        hr_res = authed.table('health_records').select(
+            'resting_hr, measured_at'
+        ).eq('user_id', uid).order('measured_at', desc=True).limit(1).execute()
+        if hr_res.data and hr_res.data[0].get('resting_hr'):
+            resting_hr = hr_res.data[0]['resting_hr']
+    except Exception as e:
+        print(f'[PROFILE/GET] health_records warning: {type(e).__name__}: {e}')
+
+    # 프로필이 비어있다고 판단되면 None 반환 (UI가 "입력하세요" 표시)
+    has_any = any([
+        u.get('birth_date'), u.get('gender'), u.get('height'),
+        u.get('weight'), u.get('max_hr'), u.get('injury_history'), resting_hr
+    ])
+    if not has_any:
+        return jsonify({'profile': None})
+
+    return jsonify({'profile': {
+        'user_id': uid,
+        'birth_date': u.get('birth_date'),
+        'gender': u.get('gender'),
+        'height': u.get('height'),
+        'weight': u.get('weight'),
+        'resting_hr': resting_hr,
+        'max_hr': u.get('max_hr'),
+        'injury_history': u.get('injury_history'),
+    }})
 
 
 @app.route('/api/profile', methods=['POST'])
 @login_required
 def save_profile():
+    """Phase 3-2: users 컬럼 UPDATE + resting_hr 는 health_records 새 row INSERT."""
     data = request.json or {}
+    uid = session['user_id']
+    authed = _authed_db()
+
     gender = data.get('gender')
-    if gender not in ('male', 'female', None):
+    if gender not in ('male', 'female'):
         gender = None
-    MOCK['profiles'][session['user_id']] = {
-        'user_id': session['user_id'],
-        'birth_date': data.get('birth_date'),  # 'YYYY-MM-DD'
-        'gender': gender,
-        'height': data.get('height'),
-        'weight': data.get('weight'),
-        'resting_hr': data.get('resting_hr'),  # 프로덕션: health_records 최신값
-        'max_hr': data.get('max_hr'),
-        'injury_history': data.get('injury_history')
-    }
+
+    # (1) users 컬럼 UPDATE — None 도 그대로 보내서 사용자가 비웠으면 NULL 처리
+    try:
+        authed.table('users').update({
+            'birth_date': data.get('birth_date'),
+            'gender': gender,
+            'height': data.get('height'),
+            'weight': data.get('weight'),
+            'max_hr': data.get('max_hr'),
+            'injury_history': data.get('injury_history'),
+        }).eq('id', uid).execute()
+    except Exception as e:
+        print(f'[PROFILE/SAVE] users update error: {type(e).__name__}: {e}')
+        return jsonify({'error': '프로필 저장 실패'}), 500
+
+    # (2) resting_hr — 값이 있으면 health_records 에 새 row INSERT (이력 누적)
+    resting_hr = data.get('resting_hr')
+    if resting_hr:
+        try:
+            authed.table('health_records').insert({
+                'user_id': uid,
+                'resting_hr': int(resting_hr),
+            }).execute()
+        except Exception as e:
+            print(f'[PROFILE/SAVE] health_records insert warning: {type(e).__name__}: {e}')
+            # users UPDATE는 이미 성공 → 부분 성공 OK
+
     return jsonify({'ok': True})
 
 

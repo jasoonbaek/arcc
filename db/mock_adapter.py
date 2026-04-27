@@ -279,6 +279,10 @@ class MockAdapter:
     def auth(self) -> _MockAuth:
         return self._auth
 
+    def with_auth(self, access_token: str):
+        """MOCK 모드에서는 RLS 개념이 없으므로 자기 자신 그대로 반환 (no-op)."""
+        return self
+
     # 디버깅/검사용
     def _dump(self) -> dict:
         return {t: list(rows) for t, rows in self._store.tables.items()}

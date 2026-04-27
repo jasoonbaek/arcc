@@ -32,10 +32,18 @@ const Goals = {
         Goals.selectedEvent = data.goals.target_event || 'half';
         if (data.goals.target_time) {
           const parts = data.goals.target_time.split(':');
+          // 0이 빈 문자열로 변환되지 않도록 Number.isFinite로 분기
+          // 분/초는 2자리 패딩 ('00') — 디지털 시계 스타일 (1:30:00)
+          const setNum = (id, raw, pad) => {
+            const n = parseInt(raw, 10);
+            const el = document.getElementById(id);
+            if (!Number.isFinite(n)) { el.value = ''; return; }
+            el.value = pad ? String(n).padStart(2, '0') : String(n);
+          };
           if (parts.length >= 2) {
-            document.getElementById('goalHour').value = parseInt(parts[0]) || '';
-            document.getElementById('goalMin').value = parseInt(parts[1]) || '';
-            if (parts[2]) document.getElementById('goalSec').value = parseInt(parts[2]) || '';
+            setNum('goalHour', parts[0], false);   // 시간: 한 자리 그대로 (1)
+            setNum('goalMin',  parts[1], true);    // 분: 2자리 패딩 (00)
+            if (parts[2] !== undefined) setNum('goalSec', parts[2], true);  // 초: 2자리 패딩 (00)
           }
         }
         document.getElementById('goalWeekly').value = data.goals.weekly_count || 3;

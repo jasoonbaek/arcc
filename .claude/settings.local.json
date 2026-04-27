@@ -25,7 +25,10 @@
       "Bash(git -c user.email=\"jason@arcc.local\" -c user.name=\"Jason\" commit -m \"Phase 3-0 complete: schema migration + safe mode\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('main.py',encoding='utf-8'\\).read\\(\\)\\); print\\('OK: main.py syntax valid'\\)\")",
       "Bash(curl -s -o /dev/null -w \"GET / → HTTP %{http_code}\\\\n\" http://localhost:5000/)",
-      "Bash(git -c user.email=\"jason@arcc.local\" -c user.name=\"Jason\" commit -m \"Phase 3-1 complete: signup/login/logout migrated to Supabase Auth\")"
+      "Bash(git -c user.email=\"jason@arcc.local\" -c user.name=\"Jason\" commit -m \"Phase 3-1 complete: signup/login/logout migrated to Supabase Auth\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('main.py',encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('db/supabase_adapter.py',encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('db/mock_adapter.py',encoding='utf-8'\\).read\\(\\)\\); print\\('OK: 모든 파일 syntax 통과'\\)\")",
+      "Bash(head -3 \"C:\\\\Users\\\\백재순\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-----OneDrive-claude-test\\\\367bbc2d-8845-46ae-bb4e-615f7b8246b5\\\\tasks\\\\b9e0x6n1r.output\")",
+      "Bash(PYTHONUNBUFFERED=1 python -u main.py)"
     ]
   }
 }
