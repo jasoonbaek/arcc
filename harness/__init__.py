@@ -149,7 +149,7 @@ def _save_session(user_id, validated, calc_metrics, supabase):
 
     sess = supabase.table('running_sessions').insert({
         'user_id': user_id,
-        'run_date': validated.get('date', time.strftime('%Y-%m-%d')),
+        'run_date': validated.get('date') or time.strftime('%Y-%m-%d'),
         'distance': summary['distance'],
         'duration': summary['duration_sec'],
         'calories': summary.get('calories', 0),

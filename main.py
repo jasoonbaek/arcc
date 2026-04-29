@@ -655,136 +655,42 @@ def get_session_detail(session_id):
 @app.route('/api/upload', methods=['POST'])
 @login_required
 def upload_csv():
+    """Phase 3-3: harness.run_pipeline() 호출로 풀 파이프라인 실행.
+
+    실제 흐름:
+        Harness 0 (CSV 파싱) → 1 (입력 검증) → 2 (LRS/FI/TI 계산)
+        → DB 저장 (running_sessions/splits/session_metrics)
+        → Harness 3 (컨텍스트) → Claude API 호출 → 4 (안전 필터) → 5 (품질 검증)
+        → ai_feedbacks INSERT → Harness 6 (ai_coaching_logs 로깅)
+    """
     if 'file' not in request.files:
         return jsonify({'error': '파일이 없습니다'}), 400
-
     file = request.files['file']
     if not file.filename:
         return jsonify({'error': '파일을 선택해주세요'}), 400
 
-    # Mock: CSV를 실제로 파싱하되 AI 호출은 스킵
+    # CSV 디코딩 (BOM 제거)
     try:
         content = file.read()
         if content[:3] == b'\xef\xbb\xbf':
             content = content[3:]
         csv_text = content.decode('utf-8')
+    except UnicodeDecodeError:
+        return jsonify({'error': 'CSV 파일 인코딩 오류 (UTF-8 필요)'}), 400
 
-        # 실제 CSV 파싱 (harness 0, 1, 2만 실행)
-        from harness.csv_validator import validate as csv_validate
-        from harness.input_validator import validate as input_validate
-        from harness.metrics import calculate as calc_metrics
+    uid = session['user_id']
+    # access_token이 주입된 supabase-py Client (RLS 정책 통과용)
+    supabase_client = _authed_db().raw
 
-        parsed = csv_validate(csv_text)
-        validated = input_validate(parsed, filename=file.filename)
+    print(f'[UPLOAD] user={uid} filename={file.filename} csv_size={len(csv_text)}자')
 
-        # 신체정보를 지표 계산에 반영 (개인화)
-        user_profile = MOCK['profiles'].get(session['user_id'])
-        if user_profile and user_profile.get('birth_date') and not user_profile.get('age'):
-            # birth_date → age 계산 (metrics가 age 키를 기대)
-            from harness.context_builder import _age_from_birth
-            user_profile = dict(user_profile)
-            user_profile['age'] = _age_from_birth(user_profile['birth_date'])
-        calculated = calc_metrics(validated, profile=user_profile)  # supabase=None → 공식 fallback
-        print(f'[MOCK/UPLOAD] user={session["user_id"]} profile={user_profile} '
-              f'ti={calculated["ti"]} max_hr={calculated["max_hr_est"]}bpm ({calculated["max_hr_source"]})')
-
-        # Mock 세션 저장
-        sid = MOCK['next_session_id']
-        MOCK['next_session_id'] += 1
-        summary = validated['summary']
-
-        MOCK['sessions'][sid] = {
-            'id': sid, 'user_id': session['user_id'],
-            'run_date': validated.get('date') or datetime.now().strftime('%Y-%m-%d'),
-            'distance': summary['distance'], 'duration': summary['duration_sec'],
-            'calories': summary.get('calories', 0), 'avg_pace': summary['avg_pace'],
-            'avg_hr': summary['avg_hr'], 'max_hr': summary['max_hr'],
-            'avg_cadence': summary['avg_cadence'], 'avg_stride': summary.get('avg_stride', 0),
-            'is_sample': False, 'created_at': datetime.now().isoformat()
-        }
-        MOCK['metrics'][sid] = {'session_id': sid, 'lrs': calculated['lrs'], 'fi': calculated['fi'], 'ti': calculated['ti']}
-
-        splits_data = []
-        for i, sp in enumerate(validated['splits']):
-            splits_data.append({
-                'session_id': sid, 'split_number': i + 1, 'distance': sp['distance'],
-                'time': sp['time'], 'pace': sp['pace'],
-                'avg_hr': sp['avg_hr'], 'max_hr': sp['max_hr'],
-                'cadence': sp['cadence'], 'stride': sp.get('stride', 0)
-            })
-        MOCK['splits'][sid] = splits_data
-
-        # Mock AI feedback — 신체정보를 반영하여 사용자별로 다른 피드백 생성
-        ti_kr = {'low': '저강도', 'moderate': '중강도', 'high': '고강도', 'very_high': '최고강도'}.get(calculated['ti'], '중강도')
-
-        age = (user_profile or {}).get('age')
-        weight = (user_profile or {}).get('weight')
-        resting_hr = (user_profile or {}).get('resting_hr')
-
-        # 연령대별 조언 차별화
-        if age and age >= 50:
-            age_advice = '50대 이상은 회복에 48시간 이상이 필요해요. 다음 훈련 전 충분히 쉬세요'
-            next_type, next_pace, next_zone = '이지런 + 워킹 인터벌', '편한 페이스', 'Zone 2'
-        elif age and age >= 40:
-            age_advice = '40대는 점진적 훈련이 중요해요. 주 3~4회 페이스로 꾸준히'
-            next_type, next_pace, next_zone = '지속주', '6:30~7:00/km', 'Zone 2-3'
-        elif age and age >= 30:
-            age_advice = '30대는 지구력과 속도 모두 발달시킬 수 있는 시기예요'
-            next_type, next_pace, next_zone = '템포런', '6:00/km', 'Zone 3-4'
-        elif age:
-            age_advice = '20대의 젊음을 활용해 고강도 훈련에도 도전해보세요'
-            next_type, next_pace, next_zone = '인터벌', '5:30/km', 'Zone 4'
-        else:
-            age_advice = '신체정보를 입력하면 연령별 맞춤 조언을 드려요'
-            next_type, next_pace, next_zone = '이지런', '편한 페이스', 'Zone 2'
-
-        # 안정시 심박수 기반 HRR 강도
-        hrr_note = ''
-        if age and resting_hr:
-            max_hr_est = (user_profile or {}).get('max_hr') or (220 - age)
-            hrr = max_hr_est - resting_hr
-            if hrr > 0:
-                hrr_pct = round((summary['avg_hr'] - resting_hr) / hrr * 100)
-                hrr_note = f' HRR {hrr_pct}%로 개인 심폐능력 대비 {ti_kr} 운동이었습니다.'
-
-        # 체중 기반 칼로리 소모 효율
-        weight_note = ''
-        if weight:
-            est_kcal = round(summary['distance'] * weight * 1.036)
-            weight_note = f'체중 {weight}kg 기준 예상 소모 {est_kcal}kcal (실측 {summary.get("calories", 0)}kcal)'
-
-        strengths_list = [
-            f'총 {summary["distance"]}km 완주',
-            f'평균 심박수 {summary["avg_hr"]}bpm 유지',
-            f'케이던스 {summary["avg_cadence"]}spm 유지'
-        ]
-        if weight_note:
-            strengths_list.append(weight_note)
-
-        MOCK['feedbacks'][sid] = {
-            'session_id': sid,
-            'summary': f'{ti_kr} 러닝 완료! 페이스 안정도 {calculated["lrs"]}점.{hrr_note}',
-            'strengths': json.dumps(strengths_list),
-            'improvements': json.dumps([
-                age_advice,
-                '케이던스를 185spm까지 올려보세요',
-                '러닝 후 충분한 스트레칭'
-            ]),
-            'next_training': json.dumps({
-                'type': next_type,
-                'duration': '30분',
-                'pace': next_pace,
-                'zone': next_zone,
-                'description': f'{age_advice} 맞춤 훈련으로 꾸준히 발전해봐요!'
-            }),
-            'full_response': json.dumps({'profile_used': bool(user_profile)}),
-            'created_at': datetime.now().isoformat()
-        }
-
-        result = _session_with_relations(sid)
-        return jsonify({'session': result, 'is_sample': False})
-
+    try:
+        from harness import run_pipeline
+        result = run_pipeline(csv_text, uid, supabase_client, filename=file.filename)
+        return jsonify(result)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
