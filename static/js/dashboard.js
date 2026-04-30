@@ -80,7 +80,7 @@ const Dashboard = {
           const m = Array.isArray(r.session_metrics) && r.session_metrics[0] ? r.session_metrics[0] : r.session_metrics;
           const ti = m ? MetricsHelper.tiInfo(m.ti) : null;
           html += `
-            <div class="recent-run-item" onclick="History.viewSession(${r.id})">
+            <div class="recent-run-item" onclick="History.viewSession('${r.id}')">
               <div class="recent-run-date">${MetricsHelper.formatDate(r.run_date)}</div>
               <div class="recent-run-info">${parseFloat(r.distance).toFixed(1)}km ${MetricsHelper.formatDuration(r.duration)}</div>
               ${ti ? `<span class="recent-run-intensity intensity-${m.ti}">${ti.kr}</span>` : ''}

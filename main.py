@@ -554,57 +554,96 @@ def save_profile():
 @app.route('/api/dashboard', methods=['GET'])
 @login_required
 def get_dashboard():
+    """Phase 3-3 Step 2: Supabase 직접 SELECT (MOCK 의존 제거).
+
+    - 이번 주 통계: running_sessions 임베디드 쿼리 (월요일~)
+    - 최근 3건: session_metrics 임베디드 JOIN
+    - 다음 훈련 추천: 가장 최근 ai_feedbacks
+    - 목표: users 테이블의 goal/goal_target_time/weekly_runs 직접 매핑
+    """
     uid = session['user_id']
     now = datetime.now()
     monday = now - timedelta(days=now.weekday())
     week_start = monday.strftime('%Y-%m-%d')
+    authed = _authed_db()
 
-    user_sessions = [s for s in MOCK['sessions'].values()
-                     if s['user_id'] == uid and not s['is_sample']]
+    # 이번 주 세션 (실 사용자 데이터만, 샘플 제외)
+    weekly_runs = 0
+    weekly_distance = 0.0
+    weekly_duration = 0
+    try:
+        w_res = authed.table('running_sessions').select(
+            'distance, duration'
+        ).eq('user_id', uid).eq('is_sample', False).gte('run_date', week_start).execute()
+        for r in (w_res.data or []):
+            weekly_runs += 1
+            weekly_distance += float(r.get('distance') or 0)
+            weekly_duration += int(r.get('duration') or 0)
+    except Exception as e:
+        print(f'[DASHBOARD] weekly fetch warning: {type(e).__name__}: {e}')
 
-    # Weekly
-    weekly = [s for s in user_sessions if s['run_date'] >= week_start]
-    total_runs = len(weekly)
-    total_distance = sum(s['distance'] for s in weekly)
-    total_duration = sum(s['duration'] for s in weekly)
+    # 목표 (users 테이블)
+    weekly_target = 3
+    goals_payload = None
+    try:
+        u_res = authed.table('users').select(
+            'goal, goal_target_time, weekly_runs'
+        ).eq('id', uid).single().execute()
+        if u_res.data:
+            weekly_target = int(u_res.data.get('weekly_runs') or 3)
+            if u_res.data.get('goal'):
+                goals_payload = {
+                    'user_id': uid,
+                    'purpose': 'record',
+                    'target_event': u_res.data.get('goal'),
+                    'target_time': _seconds_to_hms(u_res.data.get('goal_target_time')),
+                    'weekly_count': weekly_target,
+                }
+    except Exception as e:
+        print(f'[DASHBOARD] goals fetch warning: {type(e).__name__}: {e}')
 
-    goals = MOCK['goals'].get(uid, {})
-    weekly_target = goals.get('weekly_count', 3) if goals else 3
-
-    # Latest metrics
-    sorted_sessions = sorted(user_sessions, key=lambda s: s['run_date'], reverse=True)
-    latest_metrics = None
-    if sorted_sessions:
-        latest_id = sorted_sessions[0]['id']
-        latest_metrics = MOCK['metrics'].get(latest_id)
-
-    # Latest feedback
-    feedback = None
-    for s in sorted_sessions:
-        if s['id'] in MOCK['feedbacks']:
-            feedback = MOCK['feedbacks'][s['id']]
-            break
-
-    # Recent 3
+    # 최근 3건 + 임베디드 metrics + 가장 최근 feedback
     recent = []
-    for s in sorted_sessions[:3]:
-        rs = copy.deepcopy(s)
-        rs['session_metrics'] = [MOCK['metrics'].get(s['id'])] if s['id'] in MOCK['metrics'] else []
-        recent.append(rs)
+    latest_metrics = None
+    feedback = None
+    try:
+        # ORDER BY created_at DESC — 같은 run_date 의 여러 시도 중 가장 최근 INSERT 우선
+        # (run_date DESC 만 쓰면 같은 날짜 내 순서가 임의가 됨 → 옛 실패 row가 latest로 잡힘)
+        r_res = authed.table('running_sessions').select(
+            'id, user_id, run_date, distance, duration, calories, '
+            'avg_pace, avg_hr, max_hr, avg_cadence, avg_stride, is_sample, created_at, '
+            'session_metrics(lrs, fi, ti), '
+            'ai_feedbacks(summary, strengths, improvements, next_training)'
+        ).eq('user_id', uid).eq('is_sample', False).order('created_at', desc=True).limit(3).execute()
+        for r in (r_res.data or []):
+            recent.append(r)
+        if recent:
+            sm = recent[0].get('session_metrics') or []
+            latest_metrics = sm[0] if sm else None
+            af = recent[0].get('ai_feedbacks') or []
+            feedback = af[0] if af else None
+    except Exception as e:
+        print(f'[DASHBOARD] recent fetch warning: {type(e).__name__}: {e}')
 
-    return jsonify({
+    payload = {
         'weekly': {
-            'runs': total_runs,
-            'distance': round(total_distance, 1),
-            'duration': total_duration,
+            'runs': weekly_runs,
+            'distance': round(weekly_distance, 1),
+            'duration': weekly_duration,
             'target': weekly_target,
-            'progress': min(100, round(total_runs / weekly_target * 100)) if weekly_target else 0
+            'progress': min(100, round(weekly_runs / weekly_target * 100)) if weekly_target else 0
         },
         'metrics': latest_metrics,
         'feedback': feedback,
         'recent': recent,
-        'goals': goals if goals else None
-    })
+        'goals': goals_payload,
+    }
+    # Phase 3-3 디버그: 응답 shape 검증 (Phase 3-7 정리 시 제거)
+    print(f'[DASHBOARD] uid={uid} weekly={payload["weekly"]} '
+          f'metrics={latest_metrics} '
+          f'recent_count={len(recent)} '
+          f'feedback_keys={list(feedback.keys()) if feedback else None}')
+    return jsonify(payload)
 
 
 # ---------- Sessions (History) ----------
@@ -612,42 +651,58 @@ def get_dashboard():
 @app.route('/api/sessions', methods=['GET'])
 @login_required
 def get_sessions():
+    """Phase 3-3 Step 2: 히스토리 — Supabase 직접 SELECT.
+    필터: this_month | last_month | all (default).
+    """
     uid = session['user_id']
     filter_type = request.args.get('filter', 'all')
     now = datetime.now()
 
-    user_sessions = [s for s in MOCK['sessions'].values() if s['user_id'] == uid]
+    q = _authed_db().table('running_sessions').select(
+        'id, user_id, run_date, distance, duration, calories, '
+        'avg_pace, avg_hr, max_hr, avg_cadence, avg_stride, is_sample, created_at, '
+        'session_metrics(lrs, fi, ti), '
+        'ai_feedbacks(summary, strengths, improvements, next_training)'
+    ).eq('user_id', uid)
 
     if filter_type == 'this_month':
         start = now.replace(day=1).strftime('%Y-%m-%d')
-        user_sessions = [s for s in user_sessions if s['run_date'] >= start]
+        q = q.gte('run_date', start)
     elif filter_type == 'last_month':
         first_this = now.replace(day=1)
         last_month_end = first_this - timedelta(days=1)
         last_month_start = last_month_end.replace(day=1)
-        lms = last_month_start.strftime('%Y-%m-%d')
-        lme = last_month_end.strftime('%Y-%m-%d')
-        user_sessions = [s for s in user_sessions if lms <= s['run_date'] <= lme]
+        q = q.gte('run_date', last_month_start.strftime('%Y-%m-%d')) \
+             .lte('run_date', last_month_end.strftime('%Y-%m-%d'))
 
-    user_sessions.sort(key=lambda s: s['run_date'], reverse=True)
-
-    result = []
-    for s in user_sessions:
-        rs = copy.deepcopy(s)
-        rs['session_metrics'] = [MOCK['metrics'].get(s['id'])] if s['id'] in MOCK['metrics'] else []
-        rs['ai_feedbacks'] = [MOCK['feedbacks'].get(s['id'])] if s['id'] in MOCK['feedbacks'] else []
-        result.append(rs)
-
-    return jsonify({'sessions': result})
+    try:
+        # 같은 run_date 내 여러 row 일관된 정렬 위해 created_at 보조키 (Phase 3-7 cleanup item)
+        res = q.order('run_date', desc=True).order('created_at', desc=True).execute()
+        return jsonify({'sessions': res.data or []})
+    except Exception as e:
+        print(f'[SESSIONS] fetch error: {type(e).__name__}: {e}')
+        return jsonify({'sessions': []})
 
 
-@app.route('/api/sessions/<int:session_id>', methods=['GET'])
+@app.route('/api/sessions/<string:session_id>', methods=['GET'])
 @login_required
 def get_session_detail(session_id):
-    s = _session_with_relations(session_id)
-    if not s or s['user_id'] != session['user_id']:
+    """Phase 3-3 Step 2: 세션 상세 — Supabase 임베디드 SELECT.
+    UUID 라우트(<string:>) — 기존 <int:> 에서 변경 (UUID 호환).
+    RLS 가 본인 row만 조회 허용 → 별도 user_id 체크 불필요.
+    """
+    uid = session['user_id']
+    try:
+        res = _authed_db().table('running_sessions').select(
+            '*, session_metrics(*), ai_feedbacks(*), splits(*)'
+        ).eq('id', session_id).eq('user_id', uid).single().execute()
+    except Exception as e:
+        print(f'[SESSION/DETAIL] error sid={session_id}: {type(e).__name__}: {e}')
         return jsonify({'error': '세션을 찾을 수 없습니다'}), 404
-    return jsonify({'session': s})
+
+    if not res.data:
+        return jsonify({'error': '세션을 찾을 수 없습니다'}), 404
+    return jsonify({'session': res.data})
 
 
 # ---------- CSV Upload (mock) ----------

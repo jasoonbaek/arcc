@@ -43,7 +43,7 @@ const History = {
       const fi = m ? MetricsHelper.fiInfo(m.fi) : null;
 
       html += `
-        <div class="history-item" onclick="History.viewSession(${s.id})">
+        <div class="history-item" onclick="History.viewSession('${s.id}')">
           <div class="history-header">
             <div class="history-date">${MetricsHelper.formatDate(s.run_date)} ${s.is_sample ? '(샘플)' : ''}</div>
             ${ti ? `<span class="recent-run-intensity intensity-${m.ti}">${ti.kr}</span>` : ''}

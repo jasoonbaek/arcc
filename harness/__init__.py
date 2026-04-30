@@ -65,18 +65,18 @@ def run_pipeline(csv_text, user_id, supabase, filename=None):
                 log_entry['quality_score'] = quality['score']
 
                 # Save AI feedback
-                _save_feedback(session_id, safe_result, supabase)
+                _save_feedback(session_id, user_id, safe_result, supabase)
                 break
             except quality_checker.QualityError:
                 log_entry['retry_count'] = attempt + 1
                 if attempt == 2:
                     # Use fallback response
                     safe_result = _get_fallback_response(calculated_metrics)
-                    _save_feedback(session_id, safe_result, supabase)
+                    _save_feedback(session_id, user_id, safe_result, supabase)
             except safety_filter.SafetyError:
                 safe_result = _get_fallback_response(calculated_metrics)
                 log_entry['harness4_passed'] = False
-                _save_feedback(session_id, safe_result, supabase)
+                _save_feedback(session_id, user_id, safe_result, supabase)
                 break
 
         # Calculate timing
@@ -250,9 +250,10 @@ COROS 워치 데이터를 기반으로 한국어로 러닝 코칭을 제공합�
         raise quality_checker.QualityError('AI 응답에서 JSON을 추출할 수 없습니다')
 
 
-def _save_feedback(session_id, result, supabase):
-    """AI 피드백 저장"""
+def _save_feedback(session_id, user_id, result, supabase):
+    """AI 피드백 저장 (user_id NOT NULL 제약 + RLS 정책 충족)"""
     supabase.table('ai_feedbacks').upsert({
+        'user_id': user_id,
         'session_id': session_id,
         'summary': result.get('summary', ''),
         'strengths': json.dumps(result.get('strengths', []), ensure_ascii=False),
