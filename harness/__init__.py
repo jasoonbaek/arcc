@@ -144,51 +144,57 @@ def _fetch_profile(user_id, supabase):
 
 
 def _save_session(user_id, validated, calc_metrics, supabase):
-    """러닝 세션 + 구간 + 지표 저장"""
+    """Phase 3-7 B-3: PostgreSQL RPC 단일 호출로 트랜잭션 묶음 저장.
+
+    insert_session_bundle() PL/pgSQL 함수가
+    running_sessions + splits + session_metrics 3-INSERT를
+    단일 트랜잭션으로 처리 → 부분 실패 시 자동 ROLLBACK (원자성 보장).
+    """
     summary = validated['summary']
 
-    sess = supabase.table('running_sessions').insert({
-        'user_id': user_id,
-        'run_date': validated.get('date') or time.strftime('%Y-%m-%d'),
-        'distance': summary['distance'],
-        'duration': summary['duration_sec'],
-        'calories': summary.get('calories', 0),
-        'avg_pace': summary['avg_pace'],
-        'avg_hr': summary['avg_hr'],
-        'max_hr': summary['max_hr'],
-        'avg_cadence': summary['avg_cadence'],
-        'avg_stride': summary.get('avg_stride', 0),
-        'is_sample': False
+    res = supabase.rpc('insert_session_bundle', {
+        'p_user_id': user_id,
+        'p_session': {
+            'run_date': validated.get('date') or time.strftime('%Y-%m-%d'),
+            'distance': summary['distance'],
+            'duration': summary['duration_sec'],   # dict 키 'duration_sec' → DB 컬럼 'duration'
+            'calories': summary.get('calories', 0),
+            'avg_pace': summary['avg_pace'],
+            'avg_hr': summary['avg_hr'],
+            'max_hr': summary['max_hr'],
+            'avg_cadence': summary['avg_cadence'],
+            'avg_stride': summary.get('avg_stride', 0),
+            'is_sample': False,
+        },
+        'p_splits': [
+            {
+                'split_number': i + 1,
+                'distance': sp['distance'],
+                'time': sp['time'],
+                'pace': sp['pace'],
+                'avg_hr': sp['avg_hr'],
+                'max_hr': sp['max_hr'],
+                'cadence': sp['cadence'],
+                'stride': sp.get('stride', 0),
+            }
+            for i, sp in enumerate(validated['splits'])
+        ],
+        'p_metrics': {
+            'lrs': calc_metrics['lrs'],
+            'fi': calc_metrics['fi'],
+            'ti': calc_metrics['ti'],
+        }
     }).execute()
 
-    session_id = sess.data[0]['id']
+    # RPC 응답에서 UUID 추출 (SDK 버전에 따라 dict/list/scalar 가능)
+    session_id = res.data
+    if isinstance(session_id, list):
+        session_id = session_id[0] if session_id else None
+    if isinstance(session_id, dict):
+        session_id = session_id.get('insert_session_bundle')
 
-    # Save splits
-    splits_data = []
-    for i, sp in enumerate(validated['splits']):
-        splits_data.append({
-            'session_id': session_id,
-            'split_number': i + 1,
-            'distance': sp['distance'],
-            'time': sp['time'],
-            'pace': sp['pace'],
-            'avg_hr': sp['avg_hr'],
-            'max_hr': sp['max_hr'],
-            'cadence': sp['cadence'],
-            'stride': sp.get('stride', 0)
-        })
-    if splits_data:
-        supabase.table('splits').insert(splits_data).execute()
-
-    # Save metrics
-    supabase.table('session_metrics').insert({
-        'session_id': session_id,
-        'lrs': calc_metrics['lrs'],
-        'fi': calc_metrics['fi'],
-        'ti': calc_metrics['ti']
-    }).execute()
-
-    return sess.data[0]
+    print(f'[B-3 RPC] insert_session_bundle → session_id={session_id}')
+    return {'id': session_id}
 
 
 def _call_claude(context):
