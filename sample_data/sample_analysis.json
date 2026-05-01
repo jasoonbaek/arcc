@@ -1,0 +1,48 @@
+{
+  "_meta": {
+    "version": 1,
+    "description": "ARCC 샘플 분석 데이터 - 5km @ 7:00 페이스"
+  },
+  "summary": {
+    "distance": 5.0,
+    "duration": 2100,
+    "calories": 320,
+    "avg_pace": "7:00",
+    "avg_hr": 145,
+    "max_hr": 168,
+    "avg_cadence": 180,
+    "avg_stride": 72
+  },
+  "metrics": {
+    "lrs": 72,
+    "fi": 35,
+    "ti": "moderate"
+  },
+  "splits": [
+    {"split_number": 1, "distance": 1.0, "time": "7:15", "pace": "7:15", "avg_hr": 138, "max_hr": 148, "cadence": 178, "stride": 71},
+    {"split_number": 2, "distance": 1.0, "time": "7:05", "pace": "7:05", "avg_hr": 142, "max_hr": 155, "cadence": 180, "stride": 72},
+    {"split_number": 3, "distance": 1.0, "time": "6:55", "pace": "6:55", "avg_hr": 148, "max_hr": 160, "cadence": 182, "stride": 73},
+    {"split_number": 4, "distance": 1.0, "time": "7:00", "pace": "7:00", "avg_hr": 146, "max_hr": 162, "cadence": 180, "stride": 72},
+    {"split_number": 5, "distance": 1.0, "time": "6:45", "pace": "6:45", "avg_hr": 150, "max_hr": 168, "cadence": 181, "stride": 74}
+  ],
+  "feedback": {
+    "summary": "안정적인 페이스로 5km를 완주했어요! 심박수 관리도 잘 되고 있네요.",
+    "strengths": [
+      "일정한 페이스 유지 (7:00/km)",
+      "적정 심박수 존 유지 (145bpm)",
+      "후반부 페이스 향상 (네거티브 스플릿)"
+    ],
+    "improvements": [
+      "케이던스를 185spm까지 올려보세요",
+      "마지막 1km 페이스 유지 연습",
+      "워밍업 구간을 추가해보세요"
+    ],
+    "next_training": {
+      "type": "인터벌",
+      "duration": "30분",
+      "pace": "6:30/km",
+      "zone": "Zone 3-4",
+      "description": "400m x 6회, 회복 200m 조깅. 하프마라톤 기록 단축을 위해 속도 지구력을 키워봐요!"
+    }
+  }
+}

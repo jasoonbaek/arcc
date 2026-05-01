@@ -44,89 +44,7 @@ MOCK = {
             'injury_history': None
         }
     },
-    'sessions': {},
-    'next_session_id': 1,
-    'splits': {},
-    'metrics': {},
-    'feedbacks': {},
 }
-
-
-def _seed_mock_sessions():
-    """초기 더미 러닝 세션 생성"""
-    now = datetime.now()
-    runs = [
-        {'days_ago': 0, 'distance': 5.2, 'duration': 2280, 'calories': 345, 'avg_pace': '7:23', 'avg_hr': 152, 'max_hr': 172, 'avg_cadence': 178, 'avg_stride': 71, 'lrs': 78, 'fi': 28, 'ti': 'high'},
-        {'days_ago': 2, 'distance': 7.5, 'duration': 3420, 'calories': 510, 'avg_pace': '7:36', 'avg_hr': 145, 'max_hr': 165, 'avg_cadence': 176, 'avg_stride': 70, 'lrs': 65, 'fi': 45, 'ti': 'moderate'},
-        {'days_ago': 4, 'distance': 4.8, 'duration': 1680, 'calories': 290, 'avg_pace': '5:50', 'avg_hr': 162, 'max_hr': 185, 'avg_cadence': 185, 'avg_stride': 78, 'lrs': 58, 'fi': 62, 'ti': 'high'},
-        {'days_ago': 7, 'distance': 10.1, 'duration': 4260, 'calories': 680, 'avg_pace': '7:02', 'avg_hr': 148, 'max_hr': 170, 'avg_cadence': 180, 'avg_stride': 72, 'lrs': 82, 'fi': 38, 'ti': 'moderate'},
-        {'days_ago': 10, 'distance': 6.0, 'duration': 2520, 'calories': 400, 'avg_pace': '7:00', 'avg_hr': 140, 'max_hr': 158, 'avg_cadence': 182, 'avg_stride': 73, 'lrs': 85, 'fi': 22, 'ti': 'low'},
-        {'days_ago': 14, 'distance': 8.3, 'duration': 3480, 'calories': 560, 'avg_pace': '6:59', 'avg_hr': 150, 'max_hr': 175, 'avg_cadence': 179, 'avg_stride': 74, 'lrs': 70, 'fi': 50, 'ti': 'high'},
-        {'days_ago': 35, 'distance': 5.0, 'duration': 2100, 'calories': 330, 'avg_pace': '7:00', 'avg_hr': 142, 'max_hr': 160, 'avg_cadence': 180, 'avg_stride': 72, 'lrs': 75, 'fi': 30, 'ti': 'moderate'},
-    ]
-
-    split_templates = [
-        {'pace': '7:30', 'avg_hr': 138, 'max_hr': 148, 'cadence': 176, 'stride': 70},
-        {'pace': '7:20', 'avg_hr': 145, 'max_hr': 158, 'cadence': 178, 'stride': 71},
-        {'pace': '7:10', 'avg_hr': 150, 'max_hr': 165, 'cadence': 180, 'stride': 72},
-        {'pace': '7:15', 'avg_hr': 148, 'max_hr': 162, 'cadence': 179, 'stride': 72},
-        {'pace': '6:55', 'avg_hr': 155, 'max_hr': 170, 'cadence': 182, 'stride': 74},
-    ]
-
-    for r in runs:
-        sid = MOCK['next_session_id']
-        MOCK['next_session_id'] += 1
-        run_date = (now - timedelta(days=r['days_ago'])).strftime('%Y-%m-%d')
-
-        MOCK['sessions'][sid] = {
-            'id': sid, 'user_id': 1, 'run_date': run_date,
-            'distance': r['distance'], 'duration': r['duration'],
-            'calories': r['calories'], 'avg_pace': r['avg_pace'],
-            'avg_hr': r['avg_hr'], 'max_hr': r['max_hr'],
-            'avg_cadence': r['avg_cadence'], 'avg_stride': r['avg_stride'],
-            'is_sample': False, 'created_at': run_date
-        }
-        MOCK['metrics'][sid] = {'session_id': sid, 'lrs': r['lrs'], 'fi': r['fi'], 'ti': r['ti']}
-
-        num_splits = max(1, int(r['distance']))
-        splits = []
-        for i in range(num_splits):
-            tpl = split_templates[i % len(split_templates)]
-            splits.append({
-                'session_id': sid, 'split_number': i + 1, 'distance': 1.0,
-                'time': tpl['pace'], 'pace': tpl['pace'],
-                'avg_hr': tpl['avg_hr'], 'max_hr': tpl['max_hr'],
-                'cadence': tpl['cadence'], 'stride': tpl['stride']
-            })
-        MOCK['splits'][sid] = splits
-
-    # AI feedback for most recent session
-    first_sid = 1
-    MOCK['feedbacks'][first_sid] = {
-        'session_id': first_sid,
-        'summary': '후반부 페이스를 잘 끌어올렸어요! 꾸준한 훈련 효과가 나타나고 있습니다.',
-        'strengths': json.dumps([
-            '네거티브 스플릿 달성 (후반 가속)',
-            '심박수 존 3~4 유지로 효율적 훈련',
-            '케이던스 178spm으로 안정적'
-        ]),
-        'improvements': json.dumps([
-            '초반 1km 워밍업 페이스를 더 천천히',
-            '케이던스를 182~185spm으로 올려보세요',
-            '러닝 후 스트레칭 10분 추가'
-        ]),
-        'next_training': json.dumps({
-            'type': '템포런',
-            'duration': '40분',
-            'pace': '6:30/km',
-            'zone': 'Zone 3-4',
-            'description': '하프마라톤 기록 단축을 위해 속도 지구력을 키워봐요!'
-        }),
-        'full_response': json.dumps({}),
-        'created_at': datetime.now().isoformat()
-    }
-
-_seed_mock_sessions()
 
 
 # ============================================================
@@ -181,17 +99,6 @@ def _seconds_to_hms(n):
     h, rem = divmod(n, 3600)
     m, s = divmod(rem, 60)
     return f'{h}:{m:02d}:{s:02d}'
-
-
-def _session_with_relations(sid):
-    """세션 + metrics + feedbacks + splits 결합"""
-    s = copy.deepcopy(MOCK['sessions'].get(sid))
-    if not s:
-        return None
-    s['session_metrics'] = [MOCK['metrics'].get(sid)] if sid in MOCK['metrics'] else []
-    s['ai_feedbacks'] = [MOCK['feedbacks'].get(sid)] if sid in MOCK['feedbacks'] else []
-    s['splits'] = MOCK['splits'].get(sid, [])
-    return s
 
 
 # ============================================================
@@ -751,58 +658,69 @@ def upload_csv():
 
 # ---------- Sample Analysis (mock) ----------
 
+SAMPLE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'sample_data', 'sample_analysis.json')
+
+
 @app.route('/api/sample-analysis', methods=['POST'])
 @login_required
 def sample_analysis():
+    """Phase 3-7: 정적 JSON 기반 샘플 분석.
+
+    DB INSERT/MOCK dict 의존 없이 sample_data/sample_analysis.json 의
+    콘텐츠를 그대로 반환. run_date/created_at만 동적 주입.
+    """
     uid = session['user_id']
-    sid = MOCK['next_session_id']
-    MOCK['next_session_id'] += 1
+    try:
+        with open(SAMPLE_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f'[SAMPLE] load failed: {type(e).__name__}: {e}')
+        return jsonify({'error': '샘플 데이터를 불러올 수 없습니다'}), 500
 
-    MOCK['sessions'][sid] = {
-        'id': sid, 'user_id': uid,
-        'run_date': datetime.now().strftime('%Y-%m-%d'),
-        'distance': 5.0, 'duration': 2100, 'calories': 320,
-        'avg_pace': '7:00', 'avg_hr': 145, 'max_hr': 168,
-        'avg_cadence': 180, 'avg_stride': 72,
-        'is_sample': True, 'created_at': datetime.now().isoformat()
-    }
+    now_iso = datetime.now().isoformat()
+    today = datetime.now().strftime('%Y-%m-%d')
+    fake_sid = 'sample-fixed'
 
-    MOCK['splits'][sid] = [
-        {'session_id': sid, 'split_number': 1, 'distance': 1.0, 'time': '7:15', 'pace': '7:15', 'avg_hr': 138, 'max_hr': 148, 'cadence': 178, 'stride': 71},
-        {'session_id': sid, 'split_number': 2, 'distance': 1.0, 'time': '7:05', 'pace': '7:05', 'avg_hr': 142, 'max_hr': 155, 'cadence': 180, 'stride': 72},
-        {'session_id': sid, 'split_number': 3, 'distance': 1.0, 'time': '6:55', 'pace': '6:55', 'avg_hr': 148, 'max_hr': 160, 'cadence': 182, 'stride': 73},
-        {'session_id': sid, 'split_number': 4, 'distance': 1.0, 'time': '7:00', 'pace': '7:00', 'avg_hr': 146, 'max_hr': 162, 'cadence': 180, 'stride': 72},
-        {'session_id': sid, 'split_number': 5, 'distance': 1.0, 'time': '6:45', 'pace': '6:45', 'avg_hr': 150, 'max_hr': 168, 'cadence': 181, 'stride': 74},
-    ]
+    summary = data['summary']
+    metrics = data['metrics']
+    feedback = data['feedback']
+    splits = data['splits']
 
-    MOCK['metrics'][sid] = {'session_id': sid, 'lrs': 72, 'fi': 35, 'ti': 'moderate'}
-
-    MOCK['feedbacks'][sid] = {
-        'session_id': sid,
-        'summary': '안정적인 페이스로 5km를 완주했어요! 심박수 관리도 잘 되고 있네요.',
-        'strengths': json.dumps([
-            '일정한 페이스 유지 (7:00/km)',
-            '적정 심박수 존 유지 (145bpm)',
-            '후반부 페이스 향상 (네거티브 스플릿)'
-        ]),
-        'improvements': json.dumps([
-            '케이던스를 185spm까지 올려보세요',
-            '마지막 1km 페이스 유지 연습',
-            '워밍업 구간을 추가해보세요'
-        ]),
-        'next_training': json.dumps({
-            'type': '인터벌',
-            'duration': '30분',
-            'pace': '6:30/km',
-            'zone': 'Zone 3-4',
-            'description': '400m x 6회, 회복 200m 조깅. 하프마라톤 기록 단축을 위해 속도 지구력을 키워봐요!'
-        }),
-        'full_response': json.dumps({'is_sample': True}),
-        'created_at': datetime.now().isoformat()
-    }
-
-    result = _session_with_relations(sid)
-    return jsonify({'session': result, 'is_sample': True})
+    return jsonify({
+        'is_sample': True,
+        'session': {
+            'id': fake_sid,
+            'user_id': uid,
+            'run_date': today,
+            'distance': summary['distance'],
+            'duration': summary['duration'],
+            'calories': summary['calories'],
+            'avg_pace': summary['avg_pace'],
+            'avg_hr': summary['avg_hr'],
+            'max_hr': summary['max_hr'],
+            'avg_cadence': summary['avg_cadence'],
+            'avg_stride': summary['avg_stride'],
+            'is_sample': True,
+            'created_at': now_iso,
+            'session_metrics': [{
+                'session_id': fake_sid,
+                'lrs': metrics['lrs'],
+                'fi': metrics['fi'],
+                'ti': metrics['ti'],
+            }],
+            'ai_feedbacks': [{
+                'session_id': fake_sid,
+                'summary': feedback['summary'],
+                'strengths': feedback['strengths'],
+                'improvements': feedback['improvements'],
+                'next_training': feedback['next_training'],
+                'full_response': {'is_sample': True},
+                'created_at': now_iso,
+            }],
+            'splits': [{'session_id': fake_sid, **sp} for sp in splits],
+        }
+    })
 
 
 # ============================================================
