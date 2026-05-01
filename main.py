@@ -110,69 +110,6 @@ def index():
     return render_template('index.html')
 
 
-# ---------- Supabase 연결 테스트 (Phase 2 임시, Phase 3에서 삭제) ----------
-
-@app.route('/api/supabase-test')
-def supabase_test():
-    """현재 DB 모드 + 실제 Supabase 연결 가능 여부 진단."""
-    if not config.USE_SUPABASE:
-        return jsonify({'mode': 'MOCK', 'supabase': False})
-    try:
-        from supabase import create_client
-        client = create_client(config.SUPABASE_URL, config.SUPABASE_KEY)
-        result = client.table('users').select('id, email').limit(3).execute()
-        return jsonify({
-            'mode': 'SUPABASE',
-            'supabase': True,
-            'connection': 'OK',
-            'users_count': len(result.data),
-            'sample_emails': [u.get('email', 'no-email') for u in result.data],
-        })
-    except Exception as e:
-        return jsonify({
-            'mode': 'SUPABASE',
-            'supabase': True,
-            'connection': 'FAIL',
-            'error': str(e),
-            'error_type': type(e).__name__,
-        }), 500
-
-
-@app.route('/api/auth-test')
-@login_required
-def auth_test():
-    """Phase 3-2 진단: access_token이 PostgREST에 주입되어 RLS 통과하는지 검증.
-
-    로그인 상태에서 호출 → 본인 row 조회 → 1건 나와야 정상.
-    Phase 3-7에서 제거 예정.
-    """
-    uid = session['user_id']
-    has_token = bool(session.get('access_token'))
-
-    # (1) anon으로 조회 — RLS가 차단해서 0건 또는 None 나와야 정상
-    try:
-        anon_res = db.table('users').select('id, email').eq('id', uid).execute()
-        anon_count = len(anon_res.data) if anon_res.data else 0
-    except Exception as e:
-        anon_count = f'ERR: {type(e).__name__}'
-
-    # (2) authed로 조회 — 본인 row 1건 나와야 정상
-    try:
-        authed = _authed_db()
-        authed_res = authed.table('users').select('id, email, name').eq('id', uid).single().execute()
-        authed_data = authed_res.data
-    except Exception as e:
-        authed_data = f'ERR: {type(e).__name__}: {str(e)[:200]}'
-
-    return jsonify({
-        'session_user_id': uid,
-        'has_access_token': has_token,
-        'anon_select_count': anon_count,  # 기대: 0 (RLS 차단)
-        'authed_select': authed_data,     # 기대: {id, email, name}
-        'verdict': 'OK' if isinstance(authed_data, dict) and authed_data.get('id') == uid else 'FAIL',
-    })
-
-
 # ---------- Auth ----------
 
 @app.route('/api/auth/signup', methods=['POST'])
