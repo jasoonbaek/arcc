@@ -55,3 +55,14 @@ instance/
 
 # ---- Backups (Jason의 로컬 백업 폴더) ----
 claude-test_backup_*/
+
+# Claude Code session files (개발 도구 캐시)
+.claude/
+
+# OS / OneDrive 관련
+*~$*
+
+# Replit 자체 캐시 (있다면)
+.replit/
+.upm/
+.config/
