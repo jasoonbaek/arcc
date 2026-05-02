@@ -99,7 +99,7 @@ def build(user_id, validated, calc_metrics, supabase):
             'id, run_date, distance, avg_pace, avg_hr, session_metrics(lrs, fi, ti)'
         ).eq('user_id', user_id).gte('run_date', thirty_days_ago).eq(
             'is_sample', False
-        ).order('run_date', desc=True).limit(10).execute()
+        ).order('run_date', desc=True).order('created_at', desc=True).limit(10).execute()
 
         if recent.data:
             recent_info = "## 최근 30일 러닝 기록 (지표 추이 포함)"
