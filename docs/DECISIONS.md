@@ -553,3 +553,131 @@ Supabase Tokyo 리전 dogfooding 환경 테스트
 ## 갱신 이력
 
 2026-05-03 09:00 KST — 최초 작성 (Phase 3 + 사업/인프라 + 안전 절차 + 메타 + Open Questions, 23건)
+---
+
+### D-019. Replit TypeScript 모노레포 폐기, Python Flask 통일
+**상태:** Accepted
+**중요도:** ⭐⭐⭐
+**결정 시점:** 2026-05-03 (Sun) 오후
+
+**배경:**
+2026-04-12 Replit Agent가 자체 생성한 TypeScript + React 19 + Express 5 모노레포가 Replit Workspace에 존재. 그러나 로컬 개발(claude-test)은 2026-04-17부터 Python Flask로 별도 진행. 두 환경 분기 → 코드베이스 완전 불일치 상태.
+
+**선택지:**
+- 길 1: Replit 갈아엎고 GitHub 코드(Python Flask)로 배포 [ ✅ 채택 ]
+- 길 2: 로컬 폐기, Replit TypeScript 채택 (Phase 3-7 자산 다 버림 → ❌)
+- 길 3: 두 환경 분리 유지 (정식 런칭까지 미루기 → ❌)
+**근거:**
+1. Phase 3-2~3-7까지 검증된 자산 보존 우선 (트랜잭션 RPC, RLS 단순화, 6-테이블 ERD)
+2. 정식 런칭 인프라 = Render.com (D-016 결정), Replit 영구 사용 안 함
+3. DECISIONS.md, ERD.md 등 사업 자산 = Python 프로젝트 기반
+4. 5/2 14km 회귀 테스트 통과한 검증된 환경 = Python Flask
+
+**검증:**
+- Replit Workspace에 git pull github main → reset --hard github/main 적용
+- Python 3.11 + Flask 3.1.0 + supabase 2.13.0 + anthropic 0.52.0 설치 완료
+- DB REAL MODE 연결 확인 (Mumbai Supabase)
+- 5/2 14km 회귀 테스트 통과 (LRS 53/FI 0/TI 중강도 정확 표시)
+**부수 작업:**
+- TypeScript 잔존물 5개 삭제: artifacts/, node_modules/, lib/, scripts/, 'Download as zip'
+- replit-agent 브랜치는 보존 (안전망)
+- gitsafe-backup 그대로 유지
+
+**관련 결정:** D-016 (정식 런칭 인프라 Render.com), D-017 (Mumbai → 한국 인접 이전 방향)
+---
+
+### D-020. 보안 사고 대응 패턴 확립
+**상태:** Accepted
+**중요도:** ⭐⭐⭐
+**결정 시점:** 2026-05-03 (Sun) 15:00~16:00 KST
+**사고 개요:**
+환경변수 검증 명령어를 잘못 작성하여 4개 키 값이 Replit Shell 화면에 노출됨. 해당 명령어 패턴 `${VAR:+있음}${VAR:-없음}` 가 의도와 달리 변수 값을 그대로 출력하는 부작용 발생.
+
+**노출된 키 (4개):**
+1. ANTHROPIC_API_KEY
+2. SUPABASE_URL (URL은 비밀 아니지만 일관성 차원)
+3. SUPABASE_ANON_KEY
+4. SUPABASE_SECRET_KEY (가장 위험 - DB 전체 권한)
+
+**노출 경로:**
+- Replit Shell 화면 (본인만 시각적 확인)
+- Anthropic 대화 로그 (본 세션 내)
+- 외부 노출 0건 (GitHub push 안 됨, public 공유 안 됨)
+**조치 (순서):**
+1. Anthropic API Key 폐기 + 새 발급 (5분)
+2. Supabase Service Role Key 재발급 + default 폐기 (10분)
+3. Supabase Publishable Key 재발급 + default 폐기 (5분)
+4. Replit Secrets 4개 모두 교체 (15분)
+5. 환경변수 안전 검증 (`test -n "$VAR"`) (3분)
+6. Shell history 정리 (`history -c && history -w`) (2분)
+
+**피해 평가:**
+- Anthropic Console "Last used: never" 또는 24시간 미사용 확인 = 외부 침해 0건
+- 결제 피해 0원
+- DB 무결성 유지 (Supabase Logs 정상)
+**핵심 교훈:**
+- ❌ 위험 패턴: `echo "${VAR:+있음}${VAR:-없음}"` → 변수 값 노출
+- ✅ 안전 패턴: `test -n "$VAR" && echo "등록됨" || echo "없음"` → 값 노출 0
+- 환경변수는 **있음/없음만** 출력, **값 자체는 절대 화면에 표시 금지**
+
+**부수 발견:**
+- AI_INTEGRATIONS_ANTHROPIC_API_KEY (Replit Agent 자동 생성 변수) 발견 → 같은 값으로 동기화
+- Supabase 신형식 키 (sb_publishable_, sb_secret_) = Python supabase 2.13.0 비호환 → Legacy JWT 사용 (D-021 참조)
+
+**향후 개선:**
+- Anthropic Console 사용량 한도 (Spend Limit) 설정 권장
+- 메모장의 키 파일 → 비밀번호 매니저 이전 검토
+- Replit Secrets 변경 후 Shell 재시작 의례화
+
+**관련 결정:** D-021 (Supabase 키 호환성), D-018 (DB 변경 7단계 절차 - 보안 절차로 확장)
+
+---
+
+### D-021. Supabase 신형식 키 비호환, Legacy JWT 사용
+**상태:** Accepted
+**중요도:** ⭐⭐
+**결정 시점:** 2026-05-03 (Sun) 16:25 KST
+**배경:**
+Supabase가 최근 키 시스템을 신형식으로 업데이트. 신형식 키는 짧고(약 46자) 사람이 읽기 쉬운 prefix(`sb_publishable_`, `sb_secret_`)를 가짐. 그러나 ARCC가 사용 중인 Python supabase 라이브러리 2.13.0 (requirements.txt 고정)은 신형식 키를 지원하지 않음.
+
+**현황:**
+- Supabase 신형식: `sb_publishable_...` (anon용), `sb_secret_...` (service_role용)
+- Python supabase 2.13.0: Legacy JWT 형식 (`eyJhbGc...`) 만 인식
+- 신형식 키로 연결 시도 시: `SupabaseException: Invalid API key` 에러 발생
+
+**검증:**
+- 보안 사고 대응 후 신형식 키로 SUPABASE_KEY 등록 → Flask 실행 → Invalid API key
+- Legacy anon JWT 키로 교체 → Flask 정상 실행 → REAL MODE 연결 성공
+- 5/2 14km 회귀 테스트 통과 확인
+**결정:**
+- 즉시: Legacy anon JWT 키 (`eyJhbGc...`) 사용
+- 보안: Legacy 키도 RLS로 보호되므로 안전성 동등
+
+**향후 계획:**
+- Python supabase 라이브러리 신버전 출시 모니터링
+- 신형식 호환 버전 확인 시: requirements.txt 업데이트 + 신형식 키로 마이그레이션
+- 정식 런칭(2026-09~10) 전 검토 권장
+
+**관련 결정:** D-020 (보안 사고 대응 패턴), D-016 (정식 런칭 인프라 - 향후 마이그레이션 시점)
+
+---
+
+## 결정 진척 현황 갱신 (2026-05-04 기준)
+
+| 카테고리 | Accepted | Pending | Open Questions |
+|---|---|---|---|
+| Phase 3 | 10건 (D-001~D-010) | 0건 | - |
+| 사업 로드맵 | 4건 (D-011, D-012, D-013, D-015) | 1건 (D-014 베타) | - |
+| 인프라 | 2건 (D-016, D-017) | 0건 | 1건 (Q-004) |
+| 안전 절차 | 1건 (D-018) | 0건 | - |
+| 메타 | 1건 (M-001) | 0건 | - |
+| **추가 결정 (2026-05-03)** | **3건 (D-019, D-020, D-021)** | 0건 | - |
+| 핵심 기능 | 0건 | 0건 | 3건 (Q-001~Q-003) |
+| **합계** | **21건** | **1건** | **4건** |
+
+## 갱신 이력 (추가)
+
+2026-05-04 22:30 KST — D-019, D-020, D-021 박제 (5/3 일요일 Replit 동기화 + 보안 사고 대응 + Supabase 키 호환성)
+- D-019: Replit TypeScript 모노레포 폐기, Python Flask 통일 (⭐⭐⭐)
+- D-020: 보안 사고 대응 패턴 확립 (⭐⭐⭐)
+- D-021: Supabase 신형식 키 비호환, Legacy JWT 사용 (⭐⭐)

@@ -1,8 +1,28 @@
 run = "python main.py"
 entrypoint = "main.py"
+modules = ["python-3.11"]
 
 [nix]
 channel = "stable-24_05"
 
 [deployment]
 run = ["sh", "-c", "gunicorn --bind 0.0.0.0:$PORT main:app"]
+
+[agent]
+expertMode = true
+
+[[ports]]
+localPort = 5000
+externalPort = 5000
+
+[[ports]]
+localPort = 5173
+externalPort = 5173
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 23910
+externalPort = 80
