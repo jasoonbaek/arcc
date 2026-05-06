@@ -1,9 +1,9 @@
 # ARCC Database ERD
 
 **작성일**: 2026-05-01
-**최종 갱신**: 2026-05-02 (Phase 3-7 B-1, B-3, B-4, B-5 반영)
-**기준 커밋**: Phase 3-7 종결 커밋 (예정)
-**Phase**: 3-7 complete (11/11)
+**최종 갱신**: 2026-05-06 (Phase 3-7 B-5 보완: ai_conversations 정책 4종 추가 + 회귀 테스트 통과)
+**기준 커밋**: Phase 3-7 종결 커밋 (예정, 5/6)
+**Phase**: 3-7 complete (12/14)
 **스키마 출처**: Supabase `public` schema, `information_schema` 기반 자동 추출
 
 ---
@@ -115,12 +115,12 @@ erDiagram
 
 | 테이블 | 역할 | 컬럼 수 | row 예시 (Phase 3-7 완료 시점) |
 |---|---|---|---|
-| `running_sessions` | 러닝 세션 마스터 (부모) | 17 ✅ | 4 |
-| `splits` | 구간별 데이터 (1km, 2km...) | 11 | 31 |
-| `session_metrics` | 분석 지표 (LRS/FI/TI) | 6 ✅ | 4 |
-| `ai_feedbacks` | 정형화된 코칭 카드 | 11 | 3 |
-| `ai_conversations` | AI 대화 히스토리 (차별화 핵심) | 7 | 0 |
-| `ai_coaching_logs` | AI 호출 품질 모니터링 | 15 | 4 |
+| `running_sessions` | 러닝 세션 마스터 (부모) | 17 ✅ | 5 (5/6 회귀 +1) |
+| `splits` | 구간별 데이터 (1km, 2km...) | 11 | 37 (5/6 회귀 +6) |
+| `session_metrics` | 분석 지표 (LRS/FI/TI) | 6 ✅ | 5 (5/6 회귀 +1) |
+| `ai_feedbacks` | 정형화된 코칭 카드 | 11 | 4 (5/6 회귀 +1) |
+| `ai_conversations` | AI 대화 히스토리 (차별화 핵심) | 7 | 0 (D-028 차별점 미구현) |
+| `ai_coaching_logs` | AI 호출 품질 모니터링 | 15 | 5 (5/6 회귀 +1 추정) |
 
 **총 컬럼 수**: 67 (Phase 3-7 B-1 완료 후 9개 감소: 76→67)
 
@@ -150,7 +150,7 @@ erDiagram
 | **csv_data** | jsonb | YES | 원본 CSV 전체 (백업용) |
 | **splits_data** | jsonb | YES | 구간 데이터 (splits 테이블 보완용) |
 | **is_sample** | boolean | YES | 샘플 데이터 여부 (default: false) |
-| **created_at** | timestamp | YES | 레코드 생성 시각 (default: now()) |
+| **created_at** | timestamp **without** tz | YES | 레코드 생성 시각 (default: now()) |
 
 ✅ **컬럼 중복 정리 완료** (Phase 3-7 B-1, 2026-05-02):
 - `total_time_seconds` 제거 → `duration` 단일화
@@ -160,6 +160,8 @@ erDiagram
 - `avg_pace_seconds` 제거 (보너스) → `avg_pace` 단일화 ⭐
 - 결과: 22→17 컬럼 (5개 감소)
 
+⚠️ **시간 컬럼 일관성 위반** (Q-013, 5/6 발견): `created_at`이 timestamp **without** tz. 다른 테이블(ai_feedbacks, session_metrics, splits)은 with tz. 9월 런칭 전 통일 검토 필요.
+
 ---
 
 ### 2. `splits` (구간별 데이터)
@@ -168,19 +170,27 @@ CSV의 1km, 2km, ... 각 구간을 한 row씩.
 
 | 컬럼 | 타입 | NULL | 설명 |
 |---|---|---|---|
-| **id** | bigint (PK, sequence) | NO | 자동 증가 ID |
+| **id** | bigint (PK, sequence) | NO | 자동 증가 ID ⚠️ Q-012 |
 | **session_id** | uuid (FK→running_sessions) | NO | 부모 세션 |
 | **split_number** | integer | NO | 구간 번호 (1, 2, 3...) |
 | **distance** | numeric | YES | 구간 거리 (km) |
-| **time** | varchar | YES | 구간 시간 |
+| **time** | varchar | YES | 구간 시간 ⚠️ Q-013 |
 | **pace** | varchar | YES | 구간 페이스 |
 | **avg_hr** | integer | YES | 구간 평균 심박 |
 | **max_hr** | integer | YES | 구간 최고 심박 |
 | **cadence** | integer | YES | 구간 케이던스 |
 | **stride** | integer | YES | 구간 보폭 |
-| **created_at** | timestamp | YES | 생성 시각 |
+| **created_at** | timestamp **with** tz | YES | 생성 시각 |
 
 ✅ 컬럼 중복 없음. 깔끔.
+
+⚠️ **타입 일관성 이슈** (5/6 발견):
+- `id`가 bigint (다른 테이블 PK는 uuid) → Q-012
+- `time`이 character varying (시간이 문자열로 저장) → Q-013
+
+🔒 **RLS 정책**: `EXISTS (SELECT 1 FROM running_sessions ...)` 유지 (5/6 결정 D-029)
+- user_id 컬럼 없어 단순화 불가
+- EXISTS 정책은 정규화된 DB의 표준 RLS 패턴, 보안 효과 동일
 
 ---
 
@@ -195,7 +205,7 @@ LRS / FI / TI 등 ARCC의 핵심 분석 결과.
 | **lrs** | integer | YES | 페이스 안정도 (러닝 리듬 안정도, 0~100) |
 | **fi** | integer | YES | 피로도 지수 (0~100) |
 | **ti** | varchar | YES | 훈련 강도 (low/moderate/high/very_high) |
-| **calculated_at** | timestamp | YES | 계산 시각 |
+| **calculated_at** | timestamp **with** tz | YES | 계산 시각 ⚠️ Q-013 |
 
 ✅ **컬럼 중복 정리 완료** (Phase 3-7 B-1, 2026-05-02):
 - `lrs_score` 제거 → `lrs` 단일화
@@ -203,6 +213,10 @@ LRS / FI / TI 등 ARCC의 핵심 분석 결과.
 - `ti_level` 제거 → `ti` 단일화
 - `hrs_score` 제거 (사용 흔적 없는 dead column)
 - 결과: 10→6 컬럼 (4개 감소)
+
+⚠️ **컬럼명 일관성 이슈** (Q-013, 5/6 발견): 다른 테이블의 `created_at`과 달리 `calculated_at`. 분석 시각이라는 의미 차이는 있지만 명명 규칙 통일 검토 필요.
+
+🔒 **RLS 정책**: `EXISTS (SELECT 1 FROM running_sessions ...)` 유지 (5/6 결정 D-029)
 
 ---
 
@@ -222,17 +236,18 @@ LRS / FI / TI 등 ARCC의 핵심 분석 결과.
 | **next_training** | jsonb | YES | 다음 훈련 추천 (구조화) ⭐ |
 | **full_response** | jsonb | YES | AI 전체 응답 (백업) |
 | **feedback_data** | jsonb | YES | 추가 메타데이터 |
-| **created_at** | timestamp | YES | 생성 시각 |
+| **created_at** | timestamp **with** tz | YES | 생성 시각 |
 
 ✅ 깔끔. 컬럼 중복 없음.
 🌟 **ARCC 핵심 차별화 포인트**: 일반 ChatGPT는 텍스트 응답만 주지만, ARCC는 `next_training`을 **JSON 구조**로 저장 → 화면에 카드 형태로 깔끔 표시.
 
-🔒 **RLS 정책** (Phase 3-7 B-5, 2026-05-02 단순화 완료):
+🔒 **RLS 정책** (Phase 3-7 B-5, 5/2 단순화 완료):
 - `af_select_own`: `auth.uid() = user_id` (SELECT)
 - `af_insert_own`: `auth.uid() = user_id` (INSERT WITH CHECK)
 - `af_update_own`: `auth.uid() = user_id` (UPDATE USING + WITH CHECK)
 - 변경 전: `EXISTS (SELECT 1 FROM running_sessions WHERE ...)` 서브쿼리 기반
 - 변경 후: 직접 컬럼 비교 (성능 개선 + 가독성 향상)
+- ⚠️ DELETE 정책 부재 (다른 테이블과 비대칭, 향후 검토 항목)
 
 ---
 
@@ -248,11 +263,25 @@ ARCC의 가장 큰 차별화 포인트. 세션 메모리의 본진.
 | **request_data** | jsonb | YES | 사용자 입력 + 컨텍스트 |
 | **ai_response** | text | YES | AI 응답 본문 |
 | **analysis_type** | text | YES | 분석 종류 (running_analysis 등) |
-| **created_at** | timestamp | YES | 생성 시각 |
+| **created_at** | timestamp **without** tz | YES | 생성 시각 ⚠️ Q-013 |
 
 🌟 **ARCC의 진짜 무기**: ChatGPT의 단점(세션 메모리 없음)을 정면 돌파. 사용자별/세션별 대화 히스토리 영구 보존 → 누적된 코칭 데이터가 곧 사업 moat.
 
 ⏳ Phase 3-7 백로그 이관: `ai_feedbacks`와의 역할 명확화 필요 (B-2 항목, 다음 Phase로).
+
+🔒 **RLS 정책** (Phase 3-7 보완, 2026-05-06 / D-027):
+- 5/6 점검 결과 RLS 활성화 상태이나 **정책 0개** 발견 (보안 구멍)
+- 4종 정책 추가 완료 (BEGIN/COMMIT 트랜잭션, 멱등성 보장):
+  - `ac_select_own`: `auth.uid() = user_id` (SELECT)
+  - `ac_insert_own`: `auth.uid() = user_id` (INSERT WITH CHECK)
+  - `ac_update_own`: `auth.uid() = user_id` (UPDATE USING + WITH CHECK)
+  - `ac_delete_own`: `auth.uid() = user_id` (DELETE)
+- 회귀 테스트 통과 (5/4 5.74km 데이터, 2026-05-06 21:00 KST)
+
+⚠️ **차별점 미구현 인지** (D-028, 2026-05-06):
+- row 0개 = INSERT 코드 미구현 상태
+- 정책 인프라는 완비, 실제 활성화는 Q-001 D-022 Level 1 시작 시 본격
+- ARCC 핵심 차별점인 "DB 누적 코칭 메모리"의 데이터 레벨 구현은 6월 이후
 
 ---
 
@@ -307,10 +336,10 @@ ARCC의 가장 큰 차별화 포인트. 세션 메모리의 본진.
 | 테이블 | 정책 방식 | 비고 |
 |---|---|---|
 | `running_sessions` | `auth.uid() = user_id` (직접 비교) | 단순 |
-| `splits` | `EXISTS (SELECT 1 FROM running_sessions ...)` | user_id 컬럼 없어 EXISTS 유지 |
-| `session_metrics` | `EXISTS (SELECT 1 FROM running_sessions ...)` | user_id 컬럼 없어 EXISTS 유지 |
+| `splits` | `EXISTS (SELECT 1 FROM running_sessions ...)` | user_id 컬럼 없어 EXISTS 유지 (D-029) |
+| `session_metrics` | `EXISTS (SELECT 1 FROM running_sessions ...)` | user_id 컬럼 없어 EXISTS 유지 (D-029) |
 | `ai_feedbacks` | `auth.uid() = user_id` (직접 비교) ✅ | Phase 3-7 B-5에서 단순화 (2026-05-02) |
-| `ai_conversations` | `auth.uid() = user_id` (직접 비교) | 단순 |
+| `ai_conversations` | `auth.uid() = user_id` (직접 비교) ✅ | Phase 3-7 보완 (2026-05-06): 정책 0개 발견 → 4종 추가 (D-027) |
 | `ai_coaching_logs` | `auth.uid() = user_id` (직접 비교) | 단순 |
 
 ---
@@ -346,11 +375,27 @@ ARCC의 가장 큰 차별화 포인트. 세션 메모리의 본진.
 - [x] `context_builder.py:102`에 보조 정렬 키 `created_at DESC` 추가
 - 백로그 3건: `main.py:329`, `context_builder.py:50`, `__init__.py:137` (id DESC 보조 키, health_records 측 권장 — 다음 Phase 이관)
 
-### B-5: RLS 정책 단순화 ✅ 완료 (2026-05-02)
+### B-5: RLS 정책 단순화 ✅ 완료 (2026-05-02 / 2026-05-06 보완)
 
+**5/2 작업**:
 - [x] `ai_feedbacks` 정책 3개 (af_select_own, af_insert_own, af_update_own)
 - [x] `EXISTS` 서브쿼리 → `auth.uid() = user_id` 단순 비교 전환
 - [x] `splits`, `session_metrics`는 `user_id` 컬럼 없어 EXISTS 유지 (의도)
+
+**5/6 보완 작업** (D-027/D-028/D-029):
+- [x] 6개 테이블 RLS 전수 점검 (정찰)
+- [x] `ai_conversations` 정책 0개 발견 → 4종 추가 (D-027)
+  - ac_select_own / ac_insert_own / ac_update_own / ac_delete_own
+- [x] `splits` + `session_metrics` 단순화 포기 결정 (D-029)
+  - 이유: user_id 컬럼 없음 → 비정규화 + 마이그레이션 + 회귀 위험
+  - EXISTS 정책은 정규화된 DB의 표준 RLS 패턴, 보안 효과 동일
+- [x] 회귀 테스트 통과 (2026-05-06, 5/4 5.74km 데이터)
+- [x] DB 정합성 검증 100% 일치
+  - running_sessions: +1 (5/4 분석)
+  - splits: +6 (1km~6km)
+  - session_metrics: +1
+  - ai_feedbacks: +1
+  - ai_conversations: 0 (D-028 차별점 미구현 재확인)
 
 ### C-1: NULL session_id 진단 ✅ 완료 (2026-05-01)
 
@@ -362,7 +407,24 @@ ARCC의 가장 큰 차별화 포인트. 세션 메모리의 본진.
 
 ---
 
-**Phase 3-7 결과**: 11/11 완료. ARCC DB 스키마 정상화 + 보안 정책 최적화 + ACID 보장 달성.
+**Phase 3-7 결과**: 12/14 완료. ARCC DB 스키마 정상화 + 보안 정책 최적화 + ACID 보장 달성 + ai_conversations 정책 보완.
+
+---
+
+## ❓ Open Questions (5/6 발견)
+
+### Q-012: splits.id 타입 불일치
+- 다른 테이블 PK는 모두 `uuid` 타입
+- `splits.id`만 `bigint` 타입 (sequence 자동 증가)
+- 의도된 설계인지 실수인지 확인 필요
+- 처리: 9월 런칭 전 검토
+
+### Q-013: 시간 컬럼 일관성 위반
+- timestamp **without** time zone: `ai_conversations`, `running_sessions`
+- timestamp **with** time zone: `ai_feedbacks`, `session_metrics`, `splits`
+- 컬럼명 불일치: `session_metrics`만 `calculated_at`, 나머지 `created_at`
+- `splits.time`이 character varying (시간이 문자열로 저장)
+- 처리: 9월 런칭 전 통일 검토
 
 ---
 
