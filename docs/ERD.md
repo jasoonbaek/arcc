@@ -1,9 +1,9 @@
 # ARCC Database ERD
 
 **작성일**: 2026-05-01
-**최종 갱신**: 2026-05-06 (Phase 3-7 B-5 보완: ai_conversations 정책 4종 추가 + 회귀 테스트 통과)
-**기준 커밋**: Phase 3-7 종결 커밋 (예정, 5/6)
-**Phase**: 3-7 complete (12/14)
+**최종 갱신**: 2026-05-08 (D-031: session_memos 테이블 신설 - D-001 변경 6→7테이블)
+**기준 커밋**: D-031 박제 커밋 (예정, 5/8 또는 다음 세션)
+**Phase**: 3-7 complete + UX 진화 단계 진입
 **스키마 출처**: Supabase `public` schema, `information_schema` 기반 자동 추출
 
 ---
@@ -16,12 +16,14 @@ erDiagram
     users ||--o{ ai_feedbacks : "owns"
     users ||--o{ ai_conversations : "owns"
     users ||--o{ ai_coaching_logs : "owns"
+    users ||--o{ session_memos : "owns"
 
     running_sessions ||--o{ splits : "has"
     running_sessions ||--o| session_metrics : "analyzed_as"
     running_sessions ||--o{ ai_feedbacks : "generates"
     running_sessions ||--o{ ai_conversations : "discussed_in"
     running_sessions ||--o{ ai_coaching_logs : "logged_in"
+    running_sessions ||--o{ session_memos : "annotated_by"
 
     running_sessions {
         uuid id PK
@@ -107,13 +109,22 @@ erDiagram
         boolean is_sample
         timestamp created_at
     }
+
+    session_memos {
+        uuid id PK
+        uuid user_id FK
+        uuid session_id FK
+        text memo_type
+        text memo_text
+        timestamp created_at
+    }
 ```
 
 ---
 
 ## 📋 테이블 요약
 
-| 테이블 | 역할 | 컬럼 수 | row 예시 (Phase 3-7 완료 시점) |
+| 테이블 | 역할 | 컬럼 수 | row 예시 (2026-05-08 기준) |
 |---|---|---|---|
 | `running_sessions` | 러닝 세션 마스터 (부모) | 17 ✅ | 5 (5/6 회귀 +1) |
 | `splits` | 구간별 데이터 (1km, 2km...) | 11 | 37 (5/6 회귀 +6) |
@@ -121,8 +132,10 @@ erDiagram
 | `ai_feedbacks` | 정형화된 코칭 카드 | 11 | 4 (5/6 회귀 +1) |
 | `ai_conversations` | AI 대화 히스토리 (차별화 핵심) | 7 | 0 (D-028 차별점 미구현) |
 | `ai_coaching_logs` | AI 호출 품질 모니터링 | 15 | 5 (5/6 회귀 +1 추정) |
+| **`session_memos`** ⭐ 신규 | **사용자 메모 (D-031, 6/1 이후 활성화)** | **6** | **0 (구현 대기)** |
 
-**총 컬럼 수**: 67 (Phase 3-7 B-1 완료 후 9개 감소: 76→67)
+**총 컬럼 수**: 73 (Phase 3-7 B-1 후 67 + session_memos 6 = 73)
+**총 테이블 수**: **7** (D-001 6테이블 → 7테이블 변경, D-031에 의해)
 
 ---
 
@@ -269,6 +282,11 @@ ARCC의 가장 큰 차별화 포인트. 세션 메모리의 본진.
 
 ⏳ Phase 3-7 백로그 이관: `ai_feedbacks`와의 역할 명확화 필요 (B-2 항목, 다음 Phase로).
 
+📝 **D-031 후 역할 명확화** (2026-05-08):
+- session_memos = "사용자가 시스템에 남긴 메모" (즉시 활성화, 6/1)
+- ai_conversations = "AI와 사용자 간 대화" (Level 1+2+3 시점 활성화)
+- 두 테이블이 분리되어 각각 역할 단단해짐
+
 🔒 **RLS 정책** (Phase 3-7 보완, 2026-05-06 / D-027):
 - 5/6 점검 결과 RLS 활성화 상태이나 **정책 0개** 발견 (보안 구멍)
 - 4종 정책 추가 완료 (BEGIN/COMMIT 트랜잭션, 멱등성 보장):
@@ -309,7 +327,94 @@ ARCC의 가장 큰 차별화 포인트. 세션 메모리의 본진.
 
 🌟 **특허 출원 핵심 자료**: AI 응답의 품질을 시스템적으로 검증하는 다단계 하네스(harness) 구조 + 토큰/지연 통계 → 의료/공공 도입 시 신뢰성 입증 자료.
 
+📝 **D-031 변경 1.4 시너지** (2026-05-08): 분석 진행 중 3단계 표시 (① 데이터 정리 → ② 분석 → ③ 코칭 생성)가 본 테이블의 harness 단계와 자연스럽게 연결. 사용자 UX = 백엔드 단계 시각화.
+
 ✅ Phase 3-7 C-1 완료: NULL session_id 발생 0건 재발 없음, 안전장치 의도대로 동작 확정 (2026-05-01).
+
+---
+
+### 7. `session_memos` (사용자 메모) ⭐ 신규 (D-031, 2026-05-08)
+
+사용자가 러닝 세션에 대해 남긴 메모. ARCC 차별점 활성화의 첫 트랙.
+
+| 컬럼 | 타입 | NULL | 설명 |
+|---|---|---|---|
+| **id** | uuid (PK) | NO | 메모 고유 ID (gen_random_uuid()) |
+| **user_id** | uuid (FK→users) | NO | 메모 작성자 |
+| **session_id** | uuid (FK→running_sessions) | NO | 관련 러닝 세션 |
+| **memo_type** | text | YES | 메모 유형 (default: 'general') |
+| **memo_text** | text | NO | 메모 본문 (200자 제한) |
+| **created_at** | timestamp **with** tz | YES | 작성 시각 (default: now()) |
+
+**memo_type 후보값**: `'general'` (기본), `'injury'` (부상), `'condition'` (컨디션), `'environment'` (환경)
+
+🌟 **ARCC 차별점 활성화** (D-022, D-028과 시너지):
+- ai_conversations와 별도로 사용자 발화 누적
+- D-028 (차별점 미구현)과 별개 트랙으로 즉시 활성화 가능
+- 6/1 영상 콘텐츠 시작 시점에 차별점 데이터 누적 시작
+
+📝 **제이슨 철학** (2026-05-08): "메모 전용 테이블 = 역할 단단"
+- 단일 책임 원칙 (Single Responsibility) 적용
+- ai_conversations와 명확히 분리:
+  - session_memos = 사용자가 시스템에 남기는 메모
+  - ai_conversations = AI와 사용자 간 대화
+
+🔒 **RLS 정책** (D-031, D-027 패턴 동일):
+- `sm_select_own`: `auth.uid() = user_id` (SELECT)
+- `sm_insert_own`: `auth.uid() = user_id` (INSERT WITH CHECK)
+- `sm_update_own`: `auth.uid() = user_id` (UPDATE USING + WITH CHECK)
+- `sm_delete_own`: `auth.uid() = user_id` (DELETE)
+
+🎯 **D-031 변경 2 결정 종합**:
+
+| 결정 | 내용 |
+|---|---|
+| 2.1 저장 위치 | session_memos 신규 테이블 (옵션 C) |
+| 2.2 컬럼 구조 | 6개 컬럼 (위 표) |
+| 2.3 문자수 | 200자 |
+| 2.4 필수/선택 | 선택 (빈 메모 OK) |
+| 2.5 입력 시점 | 분석 전 + 결과 화면 추가 |
+| 2.6 표시 위치 | 결과 화면 하단 이력 목록 |
+
+📋 **마이그레이션 SQL** (D-018 단계 2):
+```sql
+-- 1. 테이블 생성
+CREATE TABLE session_memos (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES users(id) NOT NULL,
+  session_id uuid REFERENCES running_sessions(id) NOT NULL,
+  memo_type text DEFAULT 'general',
+  memo_text text NOT NULL,
+  created_at timestamp with time zone DEFAULT now()
+);
+
+-- 2. RLS 활성화
+ALTER TABLE session_memos ENABLE ROW LEVEL SECURITY;
+
+-- 3. RLS 정책 4종 (멱등성 보장)
+DROP POLICY IF EXISTS sm_select_own ON session_memos;
+CREATE POLICY sm_select_own ON session_memos
+  FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS sm_insert_own ON session_memos;
+CREATE POLICY sm_insert_own ON session_memos
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS sm_update_own ON session_memos;
+CREATE POLICY sm_update_own ON session_memos
+  FOR UPDATE USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS sm_delete_own ON session_memos;
+CREATE POLICY sm_delete_own ON session_memos
+  FOR DELETE USING (auth.uid() = user_id);
+
+-- 4. 인덱스 (성능)
+CREATE INDEX idx_session_memos_session_id ON session_memos(session_id);
+CREATE INDEX idx_session_memos_user_id ON session_memos(user_id);
+```
+
+⏳ **활성화 시점**: 6/1 변경 1+2+3 구현 후
 
 ---
 
@@ -326,8 +431,12 @@ ARCC의 가장 큰 차별화 포인트. 세션 메모리의 본진.
 | ai_conversations | session_id | → | running_sessions | id |
 | ai_coaching_logs | user_id | → | users | id |
 | ai_coaching_logs | session_id | → | running_sessions | id |
+| **session_memos** ⭐ | **user_id** | → | users | id |
+| **session_memos** ⭐ | **session_id** | → | running_sessions | id |
 
-**총 9개 FK 관계.** 모든 자식 테이블이 `running_sessions.id`를 참조 (`splits`, `session_metrics`, `ai_feedbacks`, `ai_conversations`, `ai_coaching_logs` = 5개) + `users.id` 참조 (4개).
+**총 11개 FK 관계** (기존 9개 + session_memos 2개).
+- `running_sessions.id` 참조: 6개 (splits, session_metrics, ai_feedbacks, ai_conversations, ai_coaching_logs, **session_memos**)
+- `users.id` 참조: 5개 (running_sessions, ai_feedbacks, ai_conversations, ai_coaching_logs, **session_memos**)
 
 ---
 
@@ -341,6 +450,7 @@ ARCC의 가장 큰 차별화 포인트. 세션 메모리의 본진.
 | `ai_feedbacks` | `auth.uid() = user_id` (직접 비교) ✅ | Phase 3-7 B-5에서 단순화 (2026-05-02) |
 | `ai_conversations` | `auth.uid() = user_id` (직접 비교) ✅ | Phase 3-7 보완 (2026-05-06): 정책 0개 발견 → 4종 추가 (D-027) |
 | `ai_coaching_logs` | `auth.uid() = user_id` (직접 비교) | 단순 |
+| **`session_memos`** ⭐ 신규 | **`auth.uid() = user_id` (직접 비교)** | **D-031, D-027 패턴 동일 (4종 정책)** |
 
 ---
 
@@ -369,6 +479,8 @@ ARCC의 가장 큰 차별화 포인트. 세션 메모리의 본진.
 - [x] `running_sessions` + `splits` + `session_metrics` 3개 테이블 단일 트랜잭션
 - [x] AI 호출(15초+)은 트랜잭션 밖에 배치
 - [x] 의도 실패 시 자동 ROLLBACK 검증 통과 (22P02 에러)
+
+⏳ **D-031 후 검토** (2026-05-08): session_memos는 트랜잭션 묶음 대상 X (메모 입력 = 별도 작업 흐름).
 
 ### B-4: ORDER BY 명시화 ✅ 완료 (2026-05-02)
 
@@ -401,17 +513,43 @@ ARCC의 가장 큰 차별화 포인트. 세션 메모리의 본진.
 
 - [x] 0건 재발 없음, 안전장치 의도대로 동작 확정
 
-### B-2: 테이블 역할 정리 ⏳ 백로그 이관
+### B-2: 테이블 역할 정리 ✅ D-031로 부분 해소 (2026-05-08)
 
+- [x] `session_memos` 신설로 사용자 메모와 AI 대화 분리됨
 - [ ] `ai_feedbacks` vs `ai_conversations` 역할 명확화 → 다음 Phase 이관
 
 ---
 
-**Phase 3-7 결과**: 12/14 완료. ARCC DB 스키마 정상화 + 보안 정책 최적화 + ACID 보장 달성 + ai_conversations 정책 보완.
+**Phase 3-7 결과**: 12/14 완료 (D-031로 13/14에 가까워짐). ARCC DB 스키마 정상화 + 보안 정책 최적화 + ACID 보장 달성 + ai_conversations 정책 보완 + session_memos 신설 준비.
 
 ---
 
-## ❓ Open Questions (5/6 발견)
+## 🆕 D-031 진행 상황 (2026-05-08)
+
+### 변경 1: [ARCC 분석 시작] 버튼 (5건 결정, 2026-05-07)
+- 5건 모두 결정 완료
+- 코드 변경 사항 (DB 영향 없음)
+- 6/1 구현 예정
+
+### 변경 2: 메모란 + session_memos (6건 결정, 2026-05-08)
+- 6건 모두 결정 완료
+- **DB 변경 동반** (D-001 6→7 테이블)
+- D-018 7단계 적용 대상
+- 마이그레이션 SQL 초안 작성 완료 (위 섹션 참조)
+
+### 변경 3: 프롬프트 러닝 제한 (3건 결정, 2026-05-08)
+- 3건 모두 결정 완료 (시스템 프롬프트 + 통증 응답 패턴)
+- 코드 변경 사항 (DB 영향 없음)
+- 6/1 구현 시 시스템 프롬프트 작성 (Q-017)
+
+### 박제 상태
+- D-031 본문 초안 작성 완료 (`/home/claude/D-031_draft.md`, 288줄)
+- DECISIONS.md 통합 + GitHub 커밋 = 다음 세션
+- ERD.md 갱신 (본 문서) = 다음 세션 또는 D-031 박제 시
+
+---
+
+## ❓ Open Questions (5/6, 5/8 발견)
 
 ### Q-012: splits.id 타입 불일치
 - 다른 테이블 PK는 모두 `uuid` 타입
@@ -421,10 +559,37 @@ ARCC의 가장 큰 차별화 포인트. 세션 메모리의 본진.
 
 ### Q-013: 시간 컬럼 일관성 위반
 - timestamp **without** time zone: `ai_conversations`, `running_sessions`
-- timestamp **with** time zone: `ai_feedbacks`, `session_metrics`, `splits`
+- timestamp **with** time zone: `ai_feedbacks`, `session_metrics`, `splits`, **`session_memos` (신규, with tz)** ⭐
 - 컬럼명 불일치: `session_metrics`만 `calculated_at`, 나머지 `created_at`
 - `splits.time`이 character varying (시간이 문자열로 저장)
 - 처리: 9월 런칭 전 통일 검토
+
+### Q-014: 메모 수정/삭제 정책 ⭐ 신규 (D-031 파생)
+- 메모 입력 후 수정 가능?
+- 메모 삭제 가능?
+- 잘못 입력한 메모 처리?
+- RLS 정책에 update/delete는 활성화되어 있으나 UI 미정
+- 처리: D-031 박제 후 또는 6/1 구현 시 결정
+
+### Q-015: memo_type 후보값 확정 ⭐ 신규 (D-031 파생)
+- 현재 4개 (general/injury/condition/environment)
+- 충분한가? 추가 필요한가? (예: 'recovery', 'goal', 'reflection')
+- 사용자가 직접 추가 가능?
+- 처리: 7월 사용 패턴 보고 결정
+
+### Q-016: 무한 재분석 방지 ⭐ 신규 (D-031 파생)
+- 변경 1.5 (재분석)에서 사용자가 메모만 살짝 바꿔서 무한 재분석 → API 비용 폭증 위험
+- 1러닝당 재분석 최대 횟수 제한? (3회?)
+- 또는 [정말 재분석?] 확인 다이얼로그?
+- 또는 무제한 (B2C 유료 모델로 제어)?
+- 처리: 6/1 구현 시 결정 또는 본격 운영 후 데이터 보고
+
+### Q-017: 시스템 프롬프트 실제 문구 ⭐ 신규 (D-031 파생)
+- 변경 3.1 (시스템 프롬프트 명시) 결정 완료
+- 실제 문구는 6/1 구현 시 작성
+- 통증 응답 패턴 (인지 → 강도 조절 → 전문의 상담) 명시
+- 진료과 자동 지정 금지 (5/8 제이슨 교정)
+- 처리: 6/1 구현 시 작성 + 다듬기
 
 ---
 
@@ -452,7 +617,8 @@ ARCC의 가장 큰 차별화 포인트. 세션 메모리의 본진.
      AND tc.constraint_type = 'FOREIGN KEY'
    WHERE c.table_schema = 'public'
      AND c.table_name IN ('running_sessions', 'splits', 'session_metrics',
-                          'ai_feedbacks', 'ai_conversations', 'ai_coaching_logs')
+                          'ai_feedbacks', 'ai_conversations', 'ai_coaching_logs',
+                          'session_memos')
    ORDER BY c.table_name, c.ordinal_position;
    ```
 2. CSV Export → 변경분만 이 문서에 반영
@@ -460,4 +626,4 @@ ARCC의 가장 큰 차별화 포인트. 세션 메모리의 본진.
 
 ---
 
-**문서 종료** | 다음 갱신 예정: Phase 3-8 (B-2 ai_feedbacks vs ai_conversations 역할 정리 후)
+**문서 종료** | 다음 갱신 예정: D-031 운영 적용 후 (session_memos 실제 row 누적 시점) 또는 Phase 3-8 (B-2 ai_feedbacks 역할 정리 후)
