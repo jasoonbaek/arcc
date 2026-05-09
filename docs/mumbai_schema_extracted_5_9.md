@@ -297,3 +297,160 @@ master_schema.sql 작성 시 각 컬럼에 *주석* 추가. 메모리 활용:
 ---
 
 ## 8. 다음 세션 작업 흐름 (예상)
+---
+
+## 9. RLS (Row Level Security) — 5/9 19:35 추출
+
+### 9-1. RLS 활성화 상태
+
+✅ **9개 테이블 모두 RLS 활성화** (rowsecurity = true)
+- ai_coaching_logs, ai_conversations, ai_feedbacks, health_metrics, health_records,
+  running_sessions, session_metrics, splits, users
+
+### 9-2. RLS 정책 23건
+
+#### 패턴 1: 단순 own (auth.uid() = user_id)
+
+| 테이블 | 정책 (CRUD) | 비고 |
+|---|---|---|
+| ai_coaching_logs | I, S | DELETE/UPDATE 없음 (로그 보존 의도) |
+| ai_conversations | I, S, U, D | 4개 모두 |
+| ai_feedbacks | I, S, U | DELETE 없음 (AI 응답 보존) |
+| health_records | I, S | DELETE/UPDATE 없음 (측정 기록 보존) |
+| running_sessions | I, S, U, D | 4개 모두 |
+| users | S, U | INSERT는 Auth가 처리, DELETE 없음 |
+
+(I=INSERT, S=SELECT, U=UPDATE, D=DELETE)
+
+#### 패턴 2: 간접 own (running_sessions 통한 EXISTS)
+
+session_id로 부모 테이블 거쳐 본인 확인:
+
+```sql
+EXISTS (
+  SELECT 1 FROM running_sessions rs
+  WHERE rs.id = [child].session_id
+    AND rs.user_id = auth.uid()
+)
+```
+
+- session_metrics: I, S, U (DELETE 없음)
+- splits: I, S, D (UPDATE 없음)
+
+### 9-3. 🚨 발견 1: health_metrics RLS 정책 *완전 누락*
+
+**상태**: RLS 활성화 + 정책 0건  
+**결과**: 모든 접근 거부 (사용 불가)  
+**증거**: 데이터 0행  
+**영향**: 5/2 결정의 "체성분 측정 데이터" 활용 불가능 상태  
+**조치**: master_schema.sql 작성 시 RLS 정책 추가  
+**우선순위**: 🔴 높음
+
+---
+
+## 10. CHECK 제약 — 5/9 19:35 추출
+
+### 10-1. NOT NULL 자동 제약
+
+NOT NULL 컬럼 (자동 생성, master_schema에서는 컬럼 정의에 통합):
+- ai_coaching_logs.id, ai_conversations.id
+- ai_feedbacks.id, ai_feedbacks.user_id
+- health_metrics.id, health_metrics.measured_date
+- health_records.id, running_sessions.id
+- session_metrics.id, splits.id, splits.session_id, splits.split_number
+- users.id, users.email, users.subscription_tier
+
+### 10-2. 🆕 발견 5: subscription_tier 3단계 확정
+
+```sql
+CHECK ((subscription_tier)::text = ANY (ARRAY['free', 'plus', 'pro']))
+```
+
+→ **B2C 구독 모델 3단계 확정**:
+- `free` (무료)
+- `plus` (중간)
+- `pro` (최고)
+
+5/2 메모리 추정 "월 9,900원"은 *어느 티어인지* 추적 필요. 다음 세션 결정 또는 별도 트랙.
+
+### 10-3. ⚠️ 발견 6: gender CHECK 제약 *부재*
+
+- schema.sql 정의: `gender CHECK (gender IN ('male', 'female'))`
+- Mumbai 실제: 자유 텍스트 (제약 없음)
+
+→ master_schema.sql 작성 시 결정 필요:
+- 옵션 A: 제약 추가 ('male', 'female', 'other' 등)
+- 옵션 B: 자유 텍스트 유지
+
+---
+
+## 11. 시퀀스 — 5/9 19:35 추출
+
+| 시퀀스 | 데이터 타입 | 시작값 | 증가값 |
+|---|---|---|---|
+| ai_coaching_logs_id_seq | bigint | 1 | 1 |
+| splits_id_seq | bigint | 1 | 1 |
+
+→ **Q-012 해결 단서**: splits.id, ai_coaching_logs.id = BIGINT 시퀀스로 정상 운영 중.
+
+---
+
+## 12. INDEX — 5/9 19:50 추출
+
+### 12-1. 총 INDEX 18개
+
+#### Primary Key 인덱스 (자동, 9개)
+- 모든 테이블의 *_pkey 인덱스 (id 컬럼 UNIQUE)
+
+#### UNIQUE 제약 인덱스 (자동, 2개)
+- `splits_session_id_split_number_key`: (session_id, split_number)
+- `users_email_key`: email
+
+#### 사용자 정의 INDEX (성능 최적화, 7개)
+
+| 인덱스 | 테이블 | 컬럼 | 용도 |
+|---|---|---|---|
+| idx_ai_logs_session | ai_coaching_logs | session_id | 세션별 로그 조회 |
+| idx_ai_logs_user | ai_coaching_logs | (user_id, created_at DESC) | 사용자별 최신 로그 |
+| idx_ai_feedbacks_session | ai_feedbacks | session_id | 세션별 피드백 |
+| idx_ai_feedbacks_user | ai_feedbacks | user_id | 사용자별 피드백 |
+| idx_health_records_user_date | health_records | (user_id, measured_at DESC) | 사용자별 최신 측정 |
+| idx_session_metrics_session | session_metrics | session_id | 세션별 지표 |
+| idx_splits_session | splits | (session_id, split_number) | 구간 정렬 조회 |
+
+### 12-2. 🚨 발견 7: INDEX 누락 패턴
+
+**INDEX 없는 테이블/컬럼 (성능 영향 가능)**:
+
+- ❌ **ai_conversations**: PK만 있음. user_id, session_id INDEX 없음
+- ❌ **health_metrics**: PK만 있음 (RLS도 누락)
+- ❌ **running_sessions.user_id**: 사용자별 세션 조회 시 풀스캔 위험
+
+→ master_schema.sql 작성 시 INDEX 추가 결정 필요.
+
+---
+
+## 13. 5/9 추가 발견 자산 (Step B 결과)
+
+| # | 발견 | 영향 | 우선순위 |
+|---|---|---|---|
+| 1 | health_metrics RLS 정책 누락 | 사용 불가 상태 | 🔴 높음 |
+| 2 | ai_coaching_logs UPDATE/DELETE 차단 | 의도적 추정 | 🟢 정상 |
+| 3 | health_records UPDATE/DELETE 차단 | 의도적 추정 | 🟢 정상 |
+| 4 | ai_feedbacks DELETE 차단 | 의도적 추정 | 🟢 정상 |
+| 5 | subscription_tier 3단계 (free/plus/pro) | B2C 비즈니스 결정 | 🟡 박제 가치 |
+| 6 | gender CHECK 제약 부재 | 정책 결정 필요 | 🟡 master_schema 작성 시 |
+| 7 | INDEX 누락 (ai_conversations, health_metrics, running_sessions.user_id) | 성능 영향 | 🟡 master_schema 작성 시 |
+
+---
+
+## 14. 7번 체크리스트 갱신 (5/9 19:50)
+
+- [x] CHECK 제약 추출 완료
+- [x] INDEX 추출 완료
+- [x] 시퀀스 정의 추출 완료
+- [x] RLS 정책 추출 완료
+- [ ] DEFAULT 표현식 정확한 문자열 — 다음 세션
+- [ ] 트리거 (있다면) — 다음 세션
+- [ ] FK ON UPDATE 옵션 — 다음 세션
+- [ ] PRIMARY KEY users.id 중복 표시 재확인 — 다음 세션
