@@ -109,7 +109,7 @@ erDiagram
         boolean is_sample
         timestamp created_at
     }
-
+%% 5/9 D-032: 메모2 폐기 결정. 메모1만 사용 시 memo_type 컬럼 자체 제거 검토 (Q-015).
     session_memos {
         uuid id PK
         uuid user_id FK
