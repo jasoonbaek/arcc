@@ -1794,3 +1794,222 @@ M-001 협업 원칙에 #5 추가:
 ### Related Discussion
 
 5/9 KST 메모2 논의 1.5시간이 직접 계기. 1시간 논의가 헛수고가 아닌 이유 = D-032 + D-033 + M-001 #5 박제 = 자산 3개 생성.
+---
+
+## D-034: Supabase Seoul 리전 이전 — 결정 확정 + 조건부 실행
+
+**Status**: Accepted (결정), Pending Execution (실행)  
+**Date**: 2026-05-09 (KST)  
+**Related**: D-017 (방향 결정의 실행 단계), D-035 (master_schema.sql 선행 필요)
+
+### Context
+
+D-017에서 Mumbai → 한국 이전 *방향*은 결정. 5/9 오후 세션에서 *실행 결정*과 *시점 결정* 진행.
+
+5/9 사실 확인 결과:
+- Supabase Seoul 리전 (AWS Northeast Asia) 공식 지원
+- 리전 변경 = 새 프로젝트 + 마이그레이션 (간단 변경 불가)
+- 데이터 누적량 = 18행 (지금이 최적 타이밍)
+- Mumbai 무료 티어는 자동 백업 미지원
+
+5/9 추가 발견 (D-035 참조):
+- schema.sql ≠ Mumbai 실제 schema (단일 진실 위반)
+- Mumbai에서 추출한 진짜 schema 확보됨
+
+### Decision
+
+1. **Mumbai → Seoul 리전 이전 실행 확정**
+2. **실행 시점**: master_schema.sql 완성 *후*
+   - 즉, D-035 후속 작업 완료 후
+   - 다음 세션 또는 이후
+3. **데이터 보존 정책**: 전략 A (다 버리고 새로 시작)
+   - 18행 모두 재현 가능 데이터
+   - 깔끔한 시작
+4. **신규 프로젝트명**: `ARCC-Seoul` (1~2주 안전 버퍼 동안 Mumbai와 구분)
+5. **Mumbai 프로젝트**: 1~2주 유지 후 삭제
+
+### Rationale
+
+1. Seoul 리전 *기술적으로 가능* 확인됨
+2. 데이터 누적 최소 시점이 *지금* (이번 주 ~ 다음 주)
+3. 5월말 D-031 변경 2 작업 *전* 완료 목표
+4. 법적 리스크 자체 감소 (한국 데이터 → 한국 서버)
+5. master_schema.sql 선행 필요 → 즉시 실행 X (D-033 정신)
+
+### Consequences
+
+**즉시 실행 가능 사항**: 없음 (D-035 선행 필요)
+
+**선행 조건 충족 후 실행할 사항**:
+- 새 Supabase 프로젝트 (Seoul 리전, "ARCC-Seoul") 생성
+- master_schema.sql 적용
+- Replit Workspace ENV 변경 (SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SECRET_KEY)
+- Auth 설정 재구성
+
+**미실행 사항**:
+- 변호사 자문 (별도 트랙, B2B/B2G 진출 시점)
+- Mumbai 데이터 백업 (전략 A로 불필요)
+
+### Open Sub-tasks
+
+- master_schema.sql 작성 완료 (D-035)
+- ON DELETE 정책 통일 (D-036)
+- ENV 변경 후 동작 검증 절차
+
+---
+
+## D-035: schema 진실 복원 + master_schema.sql 채택
+
+**Status**: Accepted (결정), Pending Implementation (구현)  
+**Date**: 2026-05-09 (KST)  
+**Related**: D-007 (단일 진실 원칙), D-034 (Seoul 이전의 선행), Q-012 (부분 해결)
+
+### Context
+
+5/9 오후 세션에서 D-017 실행 준비 중 발견:
+
+**기존 GitHub 저장소 상태**:
+- `supabase_schema.sql` (Phase 2 추가분, 8개 테이블 정의)
+- `migrations/001_gender_and_context_full.sql` (Phase 1 보정, 1개 파일만)
+- 커밋 메시지: "Phase 1 complete: MOCK mode baseline before Supabase migration"
+
+**Mumbai 실제 DB 상태**:
+- 9개 테이블 운영 중 (schema.sql 8개 + ai_conversations, health_metrics 추가)
+- 모든 FK가 UUID-UUID로 *정상 작동*
+
+**핵심 문제**:
+1. schema.sql과 Mumbai DB가 *서로 다른 진실*을 말함
+2. GitHub의 어떤 파일도 Mumbai의 *실제 schema*를 정확히 표현하지 않음
+3. D-007 (단일 진실) 원칙 위반
+
+### Decision
+
+1. **Mumbai DB의 실제 schema = "진실"로 인정**
+2. **새 파일 `docs/master_schema.sql` 작성 → GitHub 박제**
+   - 작성 시점: 다음 세션 (1~1.5시간 소요 예상)
+   - 작성자: 5/9 추출 결과 기반 + PK/FK/UNIQUE 정보 통합
+3. **기존 `supabase_schema.sql` → `archive/supabase_schema_phase2_initial.sql`로 이동**
+4. **migrations/ 폴더 정책**: master_schema.sql 시점 *이후*의 변경만 추가
+5. **이번 세션 박제**: `docs/mumbai_schema_extracted_5_9.md` 임시 파일 생성 ✅ 완료
+
+### Rationale
+
+1. **D-007 단일 진실 원칙 복원 시급**
+2. **Mumbai = 작동하는 운영 DB** = 신뢰할 수 있는 진실
+3. **schema.sql은 *역사적 자료*로 보존** (archive)
+4. **다음 세션 정확히 작성**:  
+   - 컬럼 정의 + PK + FK + UNIQUE + 의미 주석 통합
+   - 추측 없는 정확함 우선
+5. **임시 파일이 다음 세션 작업의 *명확한 시작점*** (M-001 #5 정신)
+
+### Consequences
+
+**이번 세션 (5/9)**:
+- ✅ `docs/mumbai_schema_extracted_5_9.md` 생성 + 박제 (커밋 982de31)
+- ✅ D-035 결정 박제 (이 항목)
+
+**다음 세션**:
+- `docs/master_schema.sql` 작성
+- `supabase_schema.sql` → archive로 이동
+- D-035 Status를 "Accepted, Implemented"로 변경
+
+**Seoul 이전 (D-034)**:
+- master_schema.sql 완성 *후* 실행
+
+### 5/9 발견 자산 (master_schema.sql 작성 시 반영 필요)
+
+#### 발견 1: subscription_tier 컬럼 존재
+- `users.subscription_tier VARCHAR(10) NOT NULL DEFAULT 'free'`
+- B2C 구독 모델 인프라 *이미 존재* (5/2 결정과 일치)
+- 박제 시점/이유 미상 → 추적 필요
+
+#### 발견 2: ai_conversations 테이블 존재 (schema.sql에 누락)
+- AI 대화 이력 저장
+- request_data, ai_response, analysis_type, created_at
+- 현재 데이터 0행
+
+#### 발견 3: health_metrics 테이블 존재 (schema.sql에 누락)
+- 체성분 측정 데이터 시계열 저장 (특허 전략 일치)
+- inbody_score 컬럼 존재 (의미 주석 필요)
+- 현재 데이터 0행
+
+#### 발견 4: running_sessions 추가 컬럼
+- elevation_gain, elevation_loss
+- csv_data JSONB (원본 CSV 보존)
+- splits_data JSONB (구간 데이터 JSON)
+- → splits 테이블과 *이중 저장*. 정책 결정 필요 (Open Q 후보)
+
+#### 발견 5: ai_feedbacks 구조 진화
+- feedback_type TEXT DEFAULT 'session' (세션/주간/월간 구분 가능)
+- feedback_data JSONB (확장 가능 구조)
+- → Q-002, Q-003 설계 시 활용 가능
+
+#### 발견 6: medical_disclaimers 테이블 *미생성*
+- schema.sql에 정의됐지만 Mumbai에 없음
+- 대신 `users.disclaimer_agreed_at` 컬럼으로 통합
+- 통합 결정의 시점/이유 미상
+
+#### 발견 7: ON DELETE 정책 비일관성 (→ D-036 분리)
+- CASCADE / SET NULL / NO ACTION 혼재
+- 개인정보보호법 위반 위험
+- 별도 D-036에서 처리
+
+#### 발견 8: goal_target_time 타입 변경
+- schema.sql: VARCHAR(10) 'HH:MM:SS'
+- Mumbai: INTEGER (초 단위로 추정)
+- → 타입 변경 시점/이유 미상
+
+#### 발견 9: Q-012 부분 해결
+- splits.id = BIGINT (시퀀스), ai_coaching_logs.id = BIGINT
+- 다른 테이블 = UUID
+- → "이대로 갈지 통일할지" 정책만 결정 남음
+
+### Related Discussion
+
+5/9 KST 17:30~18:30 검증 작업. D-033 (M-001 #5) 두 번째 시험 적용. "10분 검증 후 재결정" 패턴이 *큰 문제 발견*으로 이어짐. 박제 자산 폭발적 증가.
+
+---
+
+## D-036: ON DELETE 정책 통일 — 결정 보류 (Open Q 전환)
+
+**Status**: Open Question Q-018 (신규)  
+**Date**: 2026-05-09 (KST)  
+**Related**: D-035 (발견 7), 개인정보보호법 준수
+
+### Context
+
+5/9 schema 진실 추출 시 발견: ON DELETE 정책 3가지 혼재
+
+| 테이블 | ON DELETE 정책 |
+|---|---|
+| ai_feedbacks (user, session) | CASCADE |
+| health_records (user) | CASCADE |
+| session_metrics (session) | CASCADE |
+| splits (session) | CASCADE |
+| ai_coaching_logs (user, session) | SET NULL |
+| ai_conversations (user, session) | NO ACTION |
+| health_metrics (user) | NO ACTION |
+| running_sessions (user) | NO ACTION |
+
+**문제**:
+- 사용자 탈퇴 시 NO ACTION 정책 = FK 위반 → 탈퇴 자체가 불가능
+- 한국 개인정보보호법 "잊혀질 권리" 위반 위험
+
+### Decision (보류)
+
+이 결정은 *충분한 논의가 필요*하므로 Q-018로 전환.
+
+**Q-018: ON DELETE 정책 통일 방향**
+- 옵션 A: 모두 CASCADE (사용자 탈퇴 시 모든 데이터 삭제)
+- 옵션 B: 익명화 가능한 로그 SET NULL + 나머지 CASCADE
+- 옵션 C: 비즈니스/법적 요구사항 별도 분석 후 테이블별 정책
+
+**결정 시점**: master_schema.sql 작성 시 (다음 세션)
+**결정 영향**: master_schema.sql FK 정의 + B2B/B2G 진출 시 법적 검토
+
+### Why Open Question, Not Decision
+
+D-033 (M-001 #5) 적용:
+- 결정 자체가 *비즈니스 + 법적 + 기술적 종합 판단* 필요
+- 5/9 단일 세션에서 충분히 논의 못 함
+- 충분한 시간 + 정보 후 결정이 옳음
