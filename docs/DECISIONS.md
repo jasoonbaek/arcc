@@ -2030,3 +2030,128 @@ D-033 (M-001 #5) 적용:
 - 결정 자체가 *비즈니스 + 법적 + 기술적 종합 판단* 필요
 - 5/9 단일 세션에서 충분히 논의 못 함
 - 충분한 시간 + 정보 후 결정이 옳음
+---
+
+## D-037: master_schema.sql 작성 위한 5종 통합 결정 (Q-018~Q-022)
+
+**Status**: Accepted (결정), Pending Implementation (master_schema.sql 적용)  
+**Date**: 2026-05-09 (KST)  
+**Related**: D-035 (master_schema.sql 채택), Q-018~Q-022 결정, Q-023 신설
+
+### Context
+
+D-035에서 master_schema.sql 작성 결정 후, 5/9 오후 schema 추가 추출(RLS, CHECK, INDEX, 시퀀스) 결과로 발견된 5개 결정 영역 통합 처리.
+
+발견 자료:
+- Mumbai DB의 RLS 정책 23건 + 누락 1건 (health_metrics)
+- subscription_tier CHECK 제약 발견 (B2C 3단계)
+- gender CHECK 제약 부재
+- INDEX 누락 패턴 (3개 테이블)
+- csv_data + splits_data + splits 테이블 이중/삼중 저장
+
+### Decisions (5종 통합)
+
+#### Q-018: ON DELETE 정책 통일 — 옵션 B 변형 채택
+
+| 출발 테이블 | 컬럼 | 결정 | 변경 여부 |
+|---|---|---|---|
+| ai_coaching_logs | user_id | SET NULL | 유지 |
+| ai_coaching_logs | session_id | SET NULL | 유지 |
+| ai_conversations | user_id | CASCADE | NO ACTION → 변경 |
+| ai_conversations | session_id | CASCADE | NO ACTION → 변경 |
+| ai_feedbacks | user_id | CASCADE | 유지 |
+| ai_feedbacks | session_id | CASCADE | 유지 |
+| health_metrics | user_id | CASCADE | NO ACTION → 변경 |
+| health_records | user_id | CASCADE | 유지 |
+| running_sessions | user_id | CASCADE | NO ACTION → 변경 |
+| session_metrics | session_id | CASCADE | 유지 |
+| splits | session_id | CASCADE | 유지 |
+
+**근거**: 한국 개인정보보호법 잊혀질 권리 충족 + ai_coaching_logs는 익명 가능 로그(토큰 사용/성능 분석)로 SET NULL 유지.
+
+#### Q-019: health_metrics RLS 정책 — 옵션 A 채택
+
+health_records 패턴 그대로 적용:
+- `hm_insert_own`: INSERT WITH CHECK (auth.uid() = user_id)
+- `hm_select_own`: SELECT USING (auth.uid() = user_id)
+- UPDATE/DELETE 정책 없음 (측정 기록 보존)
+
+#### Q-020: gender CHECK 제약 — 옵션 C 채택
+
+```sql
+gender TEXT CHECK (
+  gender IS NULL 
+  OR gender IN ('male', 'female', 'other', 'prefer_not_to_say')
+)
+```
+
+**근거**: ARCC 분석 가치(생리학적 보정) + 다양성 존중. NULL 허용 (필수 아님).
+
+#### Q-021: INDEX 추가 — 옵션 A+ 채택 (7개 신규 INDEX)
+
+**기본 4개 (발견 7 해소)**:
+- `idx_ai_conversations_user_date` (user_id, created_at DESC)
+- `idx_ai_conversations_session` (session_id)
+- `idx_health_metrics_user_date` (user_id, measured_date DESC)
+- `idx_running_sessions_user_date` (user_id, run_date DESC)
+
+**확장 대비 3개**:
+- `idx_users_subscription_tier` (subscription_tier)
+- `idx_ai_feedbacks_created_at` (created_at)
+- `idx_running_sessions_run_date` (run_date)
+
+**근거**: 11만명 시나리오 검증. 사용자별 최신 데이터 조회 + 시간 범위 분석 + B2C 통계 모두 INDEX 없으면 풀스캔.
+
+#### Q-022: csv_data + splits_data 이중 저장 — 옵션 B 채택
+
+| 항목 | 결정 |
+|---|---|
+| csv_data JSONB | 유지 (원본 추적성, 특허/디버깅) |
+| splits_data JSONB | **제거** (중복) |
+| splits 테이블 | 유지 (정규화 분석) |
+
+**실행 조건**: Replit Workspace 코드의 splits_data 의존성 검토 후 마이그레이션.  
+**디스크 절감**: 11만명 시 약 11GB (~13%).
+
+### Q-023 신설 — 익명 통계 인프라 (Q-018 보완)
+
+**배경**: Q-018 검토 시 제이슨 비즈니스 직관 ("개인정보만 삭제, 나머지 유지") 발견. 옵션 D (시간차 익명화) 인프라 필요.
+
+**Q-023: 익명 통계 인프라 구축**
+- 별도 `anonymized_*` 테이블 운영
+- 사용자 데이터 주기적 집계 (개인 식별 제거)
+- 사용자 탈퇴 시 집계 데이터는 보존
+- 시점: 5월말 마이그레이션 후 또는 베타 테스트 단계
+- 결정 영역: 어떤 데이터를 익명화 보존할지, 집계 주기, 익명화 방법
+
+### Rationale (전체)
+
+1. **master_schema.sql 작성 *전제 조건*** 모두 해소
+2. **단일 진실 복원** (D-007, D-035 정신)
+3. **법적 안전** (개인정보보호법 + GDPR 모범 사례)
+4. **확장성** (11만명 시나리오 검증)
+5. **YAGNI 원칙**: 불필요한 중복 제거 (splits_data)
+
+### Consequences
+
+**즉시 반영 (master_schema.sql 작성 시)**:
+- ON DELETE 11건 모두 정의
+- health_metrics RLS 정책 2건 추가
+- gender CHECK 제약 추가
+- INDEX 7건 신규 정의
+- splits_data 컬럼 제외
+
+**Open Sub-tasks**:
+- Q-023 (익명 통계 인프라) 결정 — 별도 트랙 (5월말 또는 베타)
+- splits_data 마이그레이션 시 코드 의존성 검토
+
+### 5/9 박제 후 상태
+
+- 결정: 36 → **37건** (D-037 추가, 5종 통합)
+- Open Q: 17 → **18건** (Q-018~Q-022 closed, Q-023 신설 = 순증 1건)
+  - Closed: Q-018, Q-019, Q-020, Q-021, Q-022 (D-037로 해결)
+  - Open: Q-023 신설
+
+### Related Discussion
+
+5/9 KST 19:17~19:55 약 40분 진행. Q-018에서 제이슨 비즈니스 직관 → Q-023 신설로 이어짐. Q-021에서 11만명 확장성 검토 → 옵션 A → 옵션 A+ 변경. M-001 #5 정신으로 결정 5건 동시 처리 (단일 세션 효율).
