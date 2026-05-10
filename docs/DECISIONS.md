@@ -2155,3 +2155,147 @@ gender TEXT CHECK (
 ### Related Discussion
 
 5/9 KST 19:17~19:55 약 40분 진행. Q-018에서 제이슨 비즈니스 직관 → Q-023 신설로 이어짐. Q-021에서 11만명 확장성 검토 → 옵션 A → 옵션 A+ 변경. M-001 #5 정신으로 결정 5건 동시 처리 (단일 세션 효율).
+
+---
+
+## D-038: 5/10 D-034 부분 실행 + 8종 발견 통합 박제
+
+**Status**: Accepted (결정), Partially Implemented (D-034 부분 실행)  
+**Date**: 2026-05-10 (KST)  
+**Related**: D-034 (Seoul 이전), D-035 (master_schema), D-037 (5종 통합 결정), D-021 (Legacy JWT)
+
+### Context
+
+5/10 KST 08:36~10:48 (휴식 1시간 포함, 실작업 약 1시간 10분) D-034 Seoul 이전 실행 시도. 회원가입까지 진짜 가동 검증 + 8건의 새 발견. 면책 동의 저장 단계에서 master_schema의 trigger 누락 발견 → 부분 종결 결정.
+
+### 8종 발견
+
+#### 발견 1: Supabase Security 옵션 (신규 시스템)
+신규 프로젝트 생성 시 3가지 옵션 발견:
+- Enable Data API (켬, supabase-py 사용)
+- Automatically expose new tables (끔, 보안 권장)
+- Enable automatic RLS (켬, 안전망)
+
+→ 어제 D-034 박제 시 모르던 영역. ARCC-Seoul에 정상 적용.
+
+#### 발견 2: Supabase 새 API Key 시스템
+2024~2025년 신규 시스템:
+- sb_publishable_*, sb_secret_* 형식
+- Legacy JWT (eyJ*)와 별도
+
+→ ARCC는 D-021로 Legacy JWT 결정. 신규 프로젝트도 Legacy 탭에서 같은 키 제공 확인.
+
+#### 발견 3: Legacy JWT 탭 위치
+ARCC-Seoul 신규 프로젝트의 [Legacy anon, service_role API keys] 탭에 Legacy JWT 키 제공.
+
+→ D-021 결정 그대로 적용 가능. 호환성 검증.
+
+#### 발견 4: "ARCC Phase 2 - MOCK MODE" 메시지 정체
+main.py 667줄 print 문. 처음에는 "그냥 메시지"로 추정했으나 실제 진단 시 의미 다름 (발견 5 참조).
+
+#### 발견 5: config.py USE_SUPABASE 진짜 분기 로직
+```python
+USE_SUPABASE = bool(SUPABASE_URL and SUPABASE_KEY)
+```
+
+SUPABASE_KEY가 비어있으면 → MOCK 인메모리 모드 자동 폴백.
+
+→ 어제까지 ARCC가 *진짜로 MOCK 모드로 작동했을 가능성*. Mumbai DB에 18행 데이터가 어떻게 들어갔는지 추적 필요 (별도 트랙).
+
+#### 발견 6: config.py가 SUPABASE_KEY 사용 (이름 불일치)
+- 코드: SUPABASE_KEY (단일)
+- Replit Secrets: SUPABASE_ANON_KEY + SUPABASE_SECRET_KEY (별도 2개)
+
+→ 코드와 환경변수 명명 불일치.
+
+#### 발견 7: SUPABASE_KEY가 Mumbai 옛날 값 (덮어쓰기로 해결)
+Replit Secrets에 SUPABASE_KEY가 *이미 존재*. Mumbai 시절 anon key 그대로 남아있음.
+
+→ ARCC-Seoul anon key로 덮어쓰기 = 회원가입 작동.
+
+#### 발견 8 (치명적): master_schema에 Auth trigger 누락
+Supabase 표준 패턴은 auth.users INSERT 시 public.users로 동기화하는 trigger 필요. master_schema.sql 511줄에 *없음*.
+
+증상:
+- 회원가입 → public.users에 row 들어가긴 함 (ARCC 코드가 직접 INSERT)
+- 근데 public.users.id ≠ auth.uid()
+- → RLS 정책 (auth.uid() = id) 항상 차단
+- → 면책 동의 저장 실패
+
+→ Q-024 신설.
+
+### Q-024 신설: master_schema v2에 Auth trigger 추가
+
+```sql
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public.users (id, email)
+  VALUES (NEW.id, NEW.email);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+```
+
+**고려 사항**:
+- ARCC 코드가 *현재* public.users 직접 INSERT 중 → trigger 추가 시 *중복 INSERT* 위험
+- 코드 수정도 함께 필요할 수도
+- 또는 ON CONFLICT DO NOTHING 추가
+- Mumbai DB가 어떻게 작동했는지 추적 후 결정
+
+**시점**: 다음 세션 (5/11~12 또는 평일 저녁)
+
+### Q-025 신설: jasoon.test 테스트 사용자 정리
+
+현재 ARCC-Seoul:
+- auth.users에 1 row (auth.uid() = AAA)
+- public.users에 1 row (id = BBB, AAA와 다름)
+- 면책 동의 미저장
+
+**옵션**:
+- A: 다 삭제하고 처음부터 (trigger 추가 후)
+- B: public.users.id를 auth.uid() 값으로 수동 수정
+- C: 그대로 두고 trigger만 추가 (기존 row는 RLS 차단 상태)
+
+→ 다음 세션 결정.
+
+### D-034 Status 변경
+
+- **이전**: Pending Execution
+- **변경**: Partially Implemented
+- **남은 작업**: master_schema v2 작성 + 검증 (Q-024, Q-025 통합)
+
+### Rationale
+
+1. **회원가입 검증 = D-034의 첫 번째 큰 산** 통과
+2. **8건 발견 = 다음 세션 명확한 작업**
+3. **M-001 #5 7-8회 적용**: 발견 폭발 시 즉시 멈춤 약속 지킴
+4. **5/9 패턴 회피**: 무리하지 않고 안전한 마무리
+5. **다음 세션 1~1.5시간 작업으로 완전 종결 가능**
+
+### Consequences
+
+**진짜 진실 발견**:
+- ARCC가 어제까지도 MOCK 모드로 작동했을 가능성
+- Mumbai DB 18행 데이터의 출처 의문
+- master_schema.sql v1은 *치명적 누락* 있음 → v2 필수
+
+**다음 세션 시작점**:
+- master_schema v2 작성 (Auth trigger 추가)
+- ARCC-Seoul 정리 또는 재구축
+- CSV 업로드 + Claude API 검증
+- D-034 완전 종결
+
+### 5/10 박제 후 상태
+
+- 결정: 37 → **38건** (D-038 추가, 8종 통합)
+- Open Q: 18 → **20건** (Q-024 + Q-025 신설)
+- M-001 #5 적용: 6회 → **8회** (5/10 7회, 8회)
+
+### Related Discussion
+
+5/10 KST 08:36~09:46 작업 + 1시간 휴식 + 10:48~11:30 박제. 휴식 약속 정확히 지킴 (5/9 처음 발견한 패턴 적용).
