@@ -2299,3 +2299,152 @@ CREATE TRIGGER on_auth_user_created
 ### Related Discussion
 
 5/10 KST 08:36~09:46 작업 + 1시간 휴식 + 10:48~11:30 박제. 휴식 약속 정확히 지킴 (5/9 처음 발견한 패턴 적용).
+
+---
+
+## D-039: Q-024 + Q-025 결정 (master_schema v2 작성 위한 자산)
+
+**Status**: Accepted (결정), Pending Implementation (master_schema v2 작성 시 반영)  
+**Date**: 2026-05-11 (KST, 월요일 저녁)  
+**Related**: D-038 (5/10 D-034 부분 실행), Q-024, Q-025
+
+### Context
+
+5/11 월요일 평일 저녁 첫 작업. D-038 박제 시 Q-024 (Auth trigger 추가)와 Q-025 (jasoon.test 정리) 신설. 오늘 두 결정을 master_schema v2 작성 *전*에 미리 확정.
+
+작업 흐름:
+- 옵션 B (결정만, 45~75분) 채택 — M-001 #5 11회차 적용 (큰 작업 옵션 A 거절)
+- 5분 grep 추가 검증 → Q-024 옵션 A 확정 (어제 추측 정정)
+- 5분 Supabase Dashboard 검증 → Q-025 옵션 A 확정
+
+### Q-024 결정: master_schema v2 Auth trigger 추가
+
+**채택: 옵션 A** (Trigger 추가, ARCC 코드 수정 불필요)
+
+```sql
+-- master_schema v2에 추가
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public.users (id, email)
+  VALUES (NEW.id, NEW.email);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+```
+
+**근거**:
+- 5/11 grep으로 ARCC 코드 분석 → `auth.sign_up()`만 호출, public.users 직접 INSERT 안 함
+- main.py 118줄 주석: "트리거가 public.users 자동 동기화" = 원래 trigger 전제 설계
+- ON CONFLICT 불필요 (충돌 자체가 안 일어남)
+- Supabase 표준 패턴, 가장 단순
+
+**어제 D-038 정정**:
+> "ARCC 코드가 *현재* public.users 직접 INSERT 중 → trigger 추가 시 *중복 INSERT* 위험"
+
+→ 이 가정 *틀렸음*. ARCC 코드는 직접 INSERT 안 함. 5/11 grep으로 확인.
+
+### Q-025 결정: jasoon.test 테스트 사용자 정리
+
+**채택: 옵션 A** (jasoon.test 삭제 후 처음부터)
+
+**현재 상태** (5/11 Dashboard 확인):
+- auth.users: 1 row (jasoon.test@arcc.test, 5/10 가입)
+- public.users: **0 rows**
+- 모든 다른 테이블: 0 rows
+
+**실행 단계** (master_schema v2 작업 시):
+1. Supabase Dashboard → Authentication → Users → jasoon.test 삭제
+2. master_schema v2 적용 (trigger 포함)
+3. ARCC에서 jasoon.test 재가입
+4. public.users에 row 1개 생성 확인 (trigger 작동)
+5. id 일치 확인 (auth.uid() == public.users.id)
+6. 면책 동의 저장 검증
+
+**근거**:
+- 데이터 1건뿐 (auth.users), 삭제 부담 X
+- 테스트 사용자 (영구 X)
+- trigger 검증 명확
+- 옵션 B (그대로 + trigger 추가)는 "이미 존재 처리" 추가 결정 필요 → 복잡
+
+### 5/11 추가 발견 2건
+
+#### 발견 9: Mumbai 추출 누락 → master_schema 누락 진짜 원인
+**표면 원인** (D-038): master_schema에 trigger 없음  
+**진짜 원인** (5/11 추적):
+- ARCC 처음 설계 시 trigger 포함 (main.py 주석 증거)
+- 5/9 mumbai_schema_extracted_5_9.md 추출 시 trigger 누락
+- master_schema.sql 작성 시 미반영
+- → D-035 schema 진실 복원 시 *trigger 영역* 빠뜨림
+
+**의의**: 5/9 추출 자료가 *불완전*했음. 다음 추출 시 trigger 포함 필요.
+
+#### 발견 10: public.users 0 rows (5/10 회원가입 진짜 결과)
+**확인**: ARCC-Seoul Dashboard → Table Editor → users = 0 rows
+
+**진짜 진실** (5/10 회원가입 흐름 재구성):
+- auth.users INSERT ✅
+- Trigger 없음 → public.users 동기화 ❌
+- ARCC 코드 INSERT 안 함 (grep 확인)
+- → public.users = 0 rows
+- ARCC가 *auth.sign_up() 응답만* 보고 성공 판단 → 면책 동의 화면 진입
+- 면책 동의 클릭 → public.users 없으니 UPDATE 실패
+
+**작은 발견**: ARCC 회원가입 흐름에 *public.users 검증 단계 없음*. 우선순위 낮음, 다음 트랙.
+
+### Rationale (전체)
+
+1. **5/11이 가치 있는 이유**:
+   - 5/10 박제 (D-038) 시 *추측 기반* 결정
+   - 5/11 5분 grep + 5분 Dashboard 검증 → *진실 기반* 결정 가능
+   - 만약 5/10에 옵션 B 결정했으면 → master_schema v2에 불필요한 ON CONFLICT 추가
+
+2. **어제 통찰 "코드 단순" 적용**:
+   - 옵션 A = 가장 단순 (trigger 1개, ON CONFLICT 없음)
+   - 옵션 B의 ON CONFLICT = 안전망인데 *필요 없는* 안전망
+
+3. **M-001 #5 11회차 적용 가치**:
+   - 큰 작업 (master_schema v2) 거절 → 결정만
+   - 평일 저녁 적정 분량 검증 (45~75분 약속)
+   - 다음 큰 작업의 효율 ↑
+
+4. **D-038과의 일관성**:
+   - D-038 박제된 *불완전 정보*를 5/11이 정정
+   - "박제 → 가동 → 발견 → 박제" 순환의 작동 사례
+
+### Consequences
+
+**다음 세션 (master_schema v2 작성) 시작점**:
+1. master_schema v1 (511줄) → v2 (트리거 추가, +20줄 예상)
+2. ARCC-Seoul jasoon.test 삭제
+3. master_schema v2 적용 (DROP + CREATE 또는 ALTER)
+4. 재가입 → trigger 검증 → 면책 동의 → CSV 업로드 → AI 분석
+5. D-034 Status → Implemented
+6. 박제
+
+**예상 작업 시간**:
+- 어제 (D-038 시): 1.5~2시간
+- 오늘 (D-039 후): **1~1.5시간** (결정 자산 30분 절감)
+
+### 5/11 박제 후 상태
+
+- 결정: 38 → **39건** (D-039 추가)
+- Open Q: 20 → **18건** (Q-024, Q-025 closed)
+- M-001 #5 적용: 10회 → **11회** (5/11 첫 적용)
+
+### 평일 저녁 첫 작업 회고
+
+5/11 KST 20:13~21:?? (예상 약 1시간):
+- 평일 저녁 적정 분량 (옵션 B) 검증 성공
+- 큰 결정 옵션 A 거절 → 약속 지킴
+- 5/9 5시간 폭주, 5/10 2시간 40분 폭주, 5/11 1시간 정상 = 페이스 정상화
+
+→ 마라토너 페이스 학습 진행 중.
+
+### Related Discussion
+
+5/10 D-038 박제 시 "다음 세션 5/11~5/16 중 평일 저녁" 약속. 5/11 첫 평일 저녁 작업으로 검증. 옵션 B (결정만) 채택으로 약속 지킴.
