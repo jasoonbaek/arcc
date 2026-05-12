@@ -529,3 +529,145 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_user();
+-- ============================================================
+-- v3 추가 (2026-05-12): Mumbai 진실 복원
+-- D-040 - 5/12 ARCC-Seoul CSV 업로드 실패 시 Mumbai 함수 추출로 진실 발견
+-- 추출 시점: 2026-05-12 KST 20:17 (Mumbai DB pg_proc 쿼리)
+-- 5/9 mumbai_schema_extracted_5_9.md 추출 시 함수 자체가 누락됨
+-- ============================================================
+
+-- ============================================================
+-- v3-1: handle_new_user → handle_new_auth_user 교체 (Mumbai 진실)
+-- v2 trigger는 (id, email)만 INSERT했음 - 불완전
+-- Mumbai 진실: (id, email, name, created_at) 4컬럼 + 이름 자동 추출
+-- ============================================================
+
+-- v2 trigger + function 삭제
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP FUNCTION IF EXISTS public.handle_new_user();
+
+-- Mumbai 진실 복원: handle_new_auth_user
+CREATE OR REPLACE FUNCTION public.handle_new_auth_user()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+BEGIN
+  INSERT INTO public.users (id, email, name, created_at)
+  VALUES (
+    NEW.id,
+    NEW.email,
+    COALESCE(NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
+    NEW.created_at
+  )
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
+$$;
+
+-- 트리거 재생성 (새 함수 이름 사용)
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_new_auth_user();
+
+-- ============================================================
+-- v3-2: insert_session_bundle 함수 (CSV 업로드 핵심)
+-- ARCC가 CSV 1개 업로드 = 3개 테이블 통합 INSERT (트랜잭션)
+-- ① running_sessions (11컬럼) → ② splits (bulk, 9컬럼) → ③ session_metrics (4컬럼)
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION public.insert_session_bundle(
+  p_user_id uuid, 
+  p_session jsonb, 
+  p_splits jsonb, 
+  p_metrics jsonb
+)
+RETURNS uuid
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_session_id UUID;
+BEGIN
+  -- ① running_sessions INSERT (11컬럼)
+  INSERT INTO public.running_sessions (
+    user_id, run_date, distance, duration,
+    calories, avg_pace, avg_hr, max_hr,
+    avg_cadence, avg_stride, is_sample
+  )
+  VALUES (
+    p_user_id,
+    (p_session->>'run_date')::date,
+    (p_session->>'distance')::numeric,
+    (p_session->>'duration')::integer,
+    COALESCE((p_session->>'calories')::integer, 0),
+    p_session->>'avg_pace',
+    (p_session->>'avg_hr')::integer,
+    (p_session->>'max_hr')::integer,
+    (p_session->>'avg_cadence')::integer,
+    COALESCE((p_session->>'avg_stride')::integer, 0),
+    COALESCE((p_session->>'is_sample')::boolean, false)
+  )
+  RETURNING id INTO v_session_id;
+
+  -- ② splits INSERT (bulk, 9컬럼 × N구간)
+  INSERT INTO public.splits (
+    session_id, split_number, distance, time, pace,
+    avg_hr, max_hr, cadence, stride
+  )
+  SELECT 
+    v_session_id,
+    (sp->>'split_number')::integer,
+    (sp->>'distance')::numeric,
+    sp->>'time',
+    sp->>'pace',
+    (sp->>'avg_hr')::integer,
+    (sp->>'max_hr')::integer,
+    (sp->>'cadence')::integer,
+    COALESCE((sp->>'stride')::integer, 0)
+  FROM jsonb_array_elements(p_splits) AS sp;
+
+  -- ③ session_metrics INSERT (4컬럼)
+  INSERT INTO public.session_metrics (
+    session_id, lrs, fi, ti
+  )
+  VALUES (
+    v_session_id,
+    (p_metrics->>'lrs')::integer,
+    (p_metrics->>'fi')::integer,
+    p_metrics->>'ti'
+  );
+
+  RETURN v_session_id;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.insert_session_bundle(uuid, jsonb, jsonb, jsonb) TO authenticated;
+
+-- ============================================================
+-- v3-3: GRANT 권한 부여 (5/10 Security 옵션 OFF 부메랑 해소)
+-- D-038 발견 1의 "Automatically expose new tables OFF"가
+-- master_schema 9개 테이블 모두 authenticated 역할 GRANT 누락 야기
+-- 5/12 발견: PostgreSQL 42501 "permission denied for table users"
+-- ============================================================
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.users TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.health_records TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.running_sessions TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.splits TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.session_metrics TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.health_metrics TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.ai_conversations TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.ai_feedbacks TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.ai_coaching_logs TO authenticated;
+
+-- BIGSERIAL PK 테이블의 sequence 권한
+GRANT USAGE, SELECT ON SEQUENCE public.splits_id_seq TO authenticated;
+GRANT USAGE, SELECT ON SEQUENCE public.ai_coaching_logs_id_seq TO authenticated;
+
+-- ============================================================
+-- v3 끝 (2026-05-12 KST 20:25 적용 완료)
+-- 검증: 5/12 OUTDOOR RUN (5.9km/46:48) 업로드 + Claude API 분석 성공
+-- 첫 dogfooding 데이터 확보
+-- ============================================================
