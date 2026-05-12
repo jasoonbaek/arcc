@@ -508,4 +508,24 @@ CREATE INDEX idx_running_sessions_run_date
 -- - Mumbai와 컬럼 순서/타입 정확성 대조
 -- - Q-023 (익명 통계 인프라) 결정 후 추가 테이블 정의
 -- - splits_data 마이그레이션 (Replit 코드 검토 후)
+-- ============================================================
+-- v2 추가 (2026-05-12): Auth ↔ public.users 동기화 트리거
+-- D-039 Q-024 옵션 A 채택
+-- 근거: 5/11 grep으로 ARCC 코드 public.users 직접 INSERT 안 함 확인
+-- ============================================================
 
+-- 함수: auth.users에 새 row 생기면 public.users에도 같은 id로 동기화
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public.users (id, email)
+  VALUES (NEW.id, NEW.email);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 트리거: auth.users INSERT 후 매 row마다 함수 실행
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_new_user();
