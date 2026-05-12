@@ -2482,3 +2482,142 @@ CREATE TRIGGER on_auth_user_created
 #### 발견 1: GRANT 권한 누락 (5/10 D-038 발견 1 부메랑)
 
 **증상**: 회원가입 + 면책 동의 클릭 시 PostgreSQL 42501 에러
+**진짜 원인**: 5/10에 변경한 "Automatically expose new tables OFF" 옵션이 *부메랑*. master_schema가 생성한 9개 테이블 모두 **authenticated 역할 GRANT 누락**. 5/10 D-038 발견 1의 *2일 후 부메랑*.
+
+**해결**: 9개 테이블 + 2개 sequence GRANT (v3-3 섹션).
+
+**의의**: 박제의 진짜 가치 — 5/10 결정이 5/12에 *예측 가능한 형태로* 부메랑. 박제 안 했으면 *진짜 원인* 추적 1시간+ 소요.
+
+#### 발견 2: insert_session_bundle 함수 누락
+
+**증상**: CSV 업로드 시 ARCC 코드가 RPC 호출 → "Could not find the function public.insert_session_bundle"
+
+**진짜 원인**: 5/9 mumbai_schema_extracted_5_9.md 추출 시 *함수 자체를 빠뜨림*. trigger도 같이 빠뜨렸음 (D-038 발견 8). 즉, 5/9 추출 = *테이블/RLS/INDEX/CHECK*만, *함수/트리거는 전혀 안 봄*.
+
+**해결**: Mumbai DB pg_proc 쿼리로 함수 정의 추출 → v3-2에 추가.
+
+#### 발견 3: handle_new_auth_user 더 풍부한 정의
+
+**비교**: 오늘 우리가 만든 v2 trigger vs Mumbai 진실
+
+| 항목 | v2 (우리 추측) | Mumbai 진실 |
+|---|---|---|
+| 함수 이름 | handle_new_user | handle_new_auth_user |
+| INSERT 컬럼 | (id, email) | (id, email, **name, created_at**) |
+| name 처리 | NULL | `raw_user_meta_data->>'name'` 자동 추출 |
+| ON CONFLICT | 없음 | `DO NOTHING` 안전망 |
+| search_path | 기본 | `SET search_path TO 'public'` 명시 |
+
+→ v2 trigger도 작동했지만 *불완전*. v3에서 Mumbai 진실로 교체.
+
+**의의**: 5/11 D-039의 "옵션 A 채택, ON CONFLICT 불필요" 결정 = *최소 작동 버전*. Mumbai 진실은 *더 완성도 높은 버전*. 둘 다 작동하지만 v3가 정답.
+
+#### 발견 4: rls_auto_enable 함수 (시스템, 추가 불필요)
+
+5/10에 켠 "Enable automatic RLS" 옵션의 자동 생성 함수. master_schema에 추가할 필요 없음 (Supabase 자동 관리).
+
+#### 발견 5: LRS/FI 점수 0점 (계산 함수 추적 필요)
+
+5/12 OUTDOOR RUN 분석 결과: 페이스 안정도 0점, 피로도 0점.
+
+**가능성**:
+- a) 진짜 0점 (정밀 계산 결과)
+- b) 계산 함수 미구현 또는 기본값 0 반환
+- c) Mumbai에서 *별도 계산 함수* 추출 누락 가능성 (발견 2와 같은 패턴)
+
+→ Q-026 신설 후보. 다음 세션 추적.
+
+### Mumbai 진실 복원 v3 — 완성 내용
+
+**v3-1**: Auth trigger 교체 (handle_new_user → handle_new_auth_user)
+- 4컬럼 INSERT + name 자동 추출 + ON CONFLICT 안전망
+
+**v3-2**: insert_session_bundle 함수 추가
+- CSV 업로드 시 3개 테이블 통합 INSERT (running_sessions + splits + session_metrics)
+- 트랜잭션 보장
+- authenticated 역할에 EXECUTE 권한
+
+**v3-3**: GRANT 11개 (9 테이블 + 2 sequence)
+- 5/10 부메랑 해소
+- 모든 테이블에 SELECT/INSERT/UPDATE/DELETE 권한
+
+**파일 크기**: v1 511줄 → v2 531줄 → **v3 671줄**
+
+### D-034 Status 변경: Partially Implemented → **Implemented**
+
+**완료된 검증** (5/9~5/12 4일 누적):
+- ✅ ARCC-Seoul 신규 프로젝트 (Seoul 리전, Healthy)
+- ✅ master_schema v3 적용 (9 테이블 + 25 RLS + 14 INDEX + 2 함수 + 1 trigger + 11 GRANT)
+- ✅ Auth 설정 (Email Provider ON, Confirm OFF)
+- ✅ Replit ENV 변경 (4개 Secret 동기화)
+- ✅ 회원가입 (jasoon.test) + trigger 자동 동기화
+- ✅ public.users.id = auth.uid() 검증
+- ✅ 면책 동의 저장 (disclaimer_agreed_at)
+- ✅ CSV 업로드 (5/12 OUTDOOR RUN 5.9km/46:48)
+- ✅ insert_session_bundle 함수 작동 (3 테이블 통합 INSERT)
+- ✅ Claude API 분석 작동 ("고강도 훈련, 회복 중심 필요")
+- ✅ 첫 dogfooding 데이터 확보
+
+### Q-026 신설: LRS/FI 계산 로직 추적
+
+**배경**: 5/12 첫 분석에서 LRS, FI 점수 모두 0점. 정상 계산인지 함수 누락인지 불명.
+
+**조사 필요**:
+- ARCC 코드에서 LRS/FI 계산 위치 (grep `lrs\|fi`)
+- Mumbai DB의 다른 함수 (5/12 발견 2 패턴 재현 위험)
+- Mumbai DB의 18행 데이터에서 LRS/FI 값 추출 비교
+
+**시점**: 다음 세션 (5/13~5/16 평일 저녁 또는 주말)
+
+### Rationale (전체)
+
+1. **5/9~5/12 4일 누적의 *진짜 완성***
+   - 5/9: master_schema v1 (가설 기반)
+   - 5/10: ARCC-Seoul + v1 적용 → 부분 실패 발견 8건
+   - 5/11: Q-024/Q-025 결정 (옵션 A 확정)
+   - 5/12: v2 → 발견 2건 → v3 Mumbai 진실 복원 → 진짜 가동
+
+2. **박제 → 가동 → 발견 → 박제 순환의 작동 사례**
+   - D-038 (5/10) 박제가 D-040 (5/12) 디버그 *방향 제시*
+   - D-039 (5/11) 결정 자산이 v2 작성 *30분 단축*
+   - D-040 (5/12)이 다음 세션 *Q-026 추적 기반*
+
+3. **5/12 옵션 B + cutoff 21:30 약속**
+   - 19:42 시작 → 발견 5건 → 진짜 완전 종결까지
+   - 약 2시간 작업 (cutoff 안)
+   - 5/9 5시간 폭주 패턴 *회피 검증*
+
+### Consequences
+
+**다음 세션 (5/13~5/16 평일 저녁 또는 5/17 주말)**:
+- Q-026 (LRS/FI 계산) 추적
+- 추가 dogfooding (5/13~ 매일 러닝 데이터 업로드)
+- Mumbai DB의 18행 데이터 비교 분석 (가능 시)
+- D-XXX 박제
+
+**중기 마일스톤**:
+- 5월말: Mumbai DB 정리 (1~2주 보존 기간 종료)
+- 6/1: 에이런아재 채널 시작
+- 9~10월: 정식 런칭
+
+### 5/12 박제 후 상태
+
+- 결정: 39 → **40건** (D-040 추가)
+- Open Q: 18 → **19건** (Q-026 신설)
+- M-001 #5 적용: 11 → **18회** (5/12 7회 적용)
+  - 발견 1 후 멈춤, 발견 2 후 멈춤, cutoff 약속, 옵션 B 유지 등
+
+### 5/12 작업 회고
+
+시작 19:42 → 종료 약 21:30 (cutoff 약속 안)
+1시간 48분 작업 (휴식 없음)
+발견 5건 + 진짜 가동 검증 + 박제
+
+= 마라토너 페이스 검증 성공  
+  (5/9 5시간 폭주 대비 1/3 시간 + 핵심 성과 확보)
+
+### Related Discussion
+
+5/11 D-039 박제 시 "다음 세션 master_schema v2 작성 1~1.5시간". 5/12에 v2 → v3 진화 + 진짜 가동 검증 = D-039 자산이 *예측보다 더 빠른 완성* 가능하게 함.
+
+특히 발견 1 (GRANT) → 발견 2 (insert_session_bundle) 흐름이 *D-038 박제 자산 없이는* 1시간+ 디버그 필요했을 영역. 박제의 *복리 효과*.
