@@ -2645,3 +2645,158 @@ CREATE TRIGGER on_auth_user_created
 5/11 D-039 박제 시 "다음 세션 master_schema v2 작성 1~1.5시간". 5/12에 v2 → v3 진화 + 진짜 가동 검증 = D-039 자산이 *예측보다 더 빠른 완성* 가능하게 함.
 
 특히 발견 1 (GRANT) → 발견 2 (insert_session_bundle) 흐름이 *D-038 박제 자산 없이는* 1시간+ 디버그 필요했을 영역. 박제의 *복리 효과*.
+
+## D-041: FI 0점 진실 추적 + splits_data 컬럼 누락 발견
+
+**Date**: 2026-05-13 (수요일 평일 저녁, 19:54~22:00)
+**Status**: Accepted
+**Session Type**: dogfooding 3회차 + Q-026 추적
+
+---
+
+### Context
+
+어제 D-040 박제 시 Q-026 신설: "FI 0점 2회 동일(5/9, 5/12) — 누적 데이터 부족 가설" 추적. 오늘 5/13 dogfooding 3회차 데이터 확보로 가설 검증 및 진실 추적.
+
+### Decision
+
+**Q-026 종결: FI 함수는 정상 동작 중, 0점은 *공식 결과가 정상적으로 0*인 것이며, 제이슨의 실력 향상(negative split 달성)의 증거임.**
+
+---
+
+### 오늘 발견 9건
+
+**① 3회차 dogfooding 결과:**
+- 5/9 (14km): LRS 59, FI 0, TI high
+- 5/12 (5.9km): LRS 0, FI 0, TI high
+- 5/13 (6.34km): LRS 45, FI 0, TI moderate
+- FI 3회 연속 0점 → "누적 데이터 부족 가설" 기각
+
+**② TI 화면-DB 매핑 정상 확인:**
+- 화면 "중강도" = DB "moderate"
+- 화면 "고강도" = DB "high"
+
+**③ calculated_at 시각 이상:**
+- 5/9 러닝의 session_metrics가 5/12 11:26에 계산됨 (3일 지연)
+- Mumbai → Seoul 이전(5/10) 시 과거 데이터 백로딩 영향 추정
+
+**④ csv_data 컬럼 NULL (3행 모두):**
+- D-035 박제 "csv_data+splits_data 이중 저장" 표현 재검토 필요
+- 실제로는 csv_data 미사용 추정
+
+**⑤ Phase 2 종합문서 vs 실제 코드 불일치:**
+- 문서: `def calc_fi(splits, resting_hr)`
+- 실제: `def _calc_fi(splits, summary)` (밑줄 prefix, 다른 파라미터)
+- 문서는 설계 의도, 실제 구현 다름
+
+**⑥ FI 공식 본문 확인 (harness/metrics.py 96~135줄):**
+
+```python
+def _calc_fi(splits, summary):
+    if len(splits) < 4: return 30
+    # 페이스 초 변환
+    if len(paces) < 4: return 30
+    half = len(paces) // 2
+    first_half_avg = sum(paces[:half]) / half
+    second_half_avg = sum(paces[half:]) / (len(paces) - half)
+    decline_pct = ((second_half_avg - first_half_avg) / first_half_avg) * 100
+    # HR drift
+    hr_drift = (sum(hrs_second)/len(hrs_second)) - (sum(hrs_first)/len(hrs_first))
+    fi = max(0, min(100, round(decline_pct * 5 + hr_drift * 1.5)))
+    return fi
+```
+
+**⑦ 5/13 데이터 수동 계산 검증:**
+- 전반 페이스(0~2): 525, 461, 410초 → 평균 465.3
+- 후반 페이스(3~6): 417, 424, 463, 433초 → 평균 434.3
+- decline_pct = -6.66% (negative split, 후반이 빠름)
+- 전반 HR: 122, 135, 141 → 132.7
+- 후반 HR: 140, 144, 144, 150 → 144.5
+- hr_drift = +11.8
+- FI = round(-6.66 × 5 + 11.8 × 1.5) = round(-33.3 + 17.7) = round(-15.6) = -16
+- max(0, min(100, -16)) = **0** ✅
+- 함수는 정확히 0을 반환하는 게 정답
+
+**⑧ Git 이력 확인 — 공식 변경 이력 없음:**
+- 명령: `git log --oneline --all -- harness/metrics.py | head -20`
+- 결과: `7372073 Phase 1 complete: MOCK mode baseline before Supabase migration` (1개)
+- metrics.py는 Phase 1 이후 단 한 번도 수정 안 됨
+- 4월 FI 20~40, 5월 FI 0의 차이는 공식 변경이 아닌 **입력 데이터 변화** = 제이슨 실력 향상
+
+**⑨ 🚨 splits_data 컬럼 ARCC-Seoul에 누락 (5/10 부메랑):**
+- Mumbai에는 4/11에 `ALTER TABLE running_sessions ADD COLUMN splits_data JSONB;` 적용됨
+- ARCC-Seoul running_sessions 테이블에 splits_data 컬럼 **없음**
+- master_schema v3(Mumbai 진실 복원)에도 누락 → master_schema v4 작업 필요
+- 현재 splits 데이터는 어떻게 처리되는지 다음 세션 추적 필요 (CSV 매번 파싱? 메모리만? 다른 컬럼?)
+
+---
+
+### D-040 정정 사항
+
+- **발견 ② 정정**: "insert_session_bundle 함수 누락" → 잘못된 정보, 함수 존재. Database Functions 3개 중 하나로 정상 등록 (`p_user_id uuid, p_session jsonb, p_splits jsonb, p_metrics ...`)
+- **발견 ⑤ 정정**: "FI 함수 동작 의심 (5/9=59점, 5/12=0점 데이터차)+FI 0점(2회 동일, 누적 데이터 필요?)" → 함수 정상 동작 확정. FI 0점은 negative split 시 정상 결과. LRS는 페이스 변동계수만 보므로 음수 clamping 없이 자연스럽게 0~100 변동.
+
+---
+
+### Q-026 종결, Q-027 신설
+
+**Q-026: Closed**
+- 답: FI 0점 = 함수 정상 + 공식 결과 정상 + 제이슨 negative split 달성
+- 다음 세션 작업: 수정 작업 **아님** (공식 그대로 유지)
+
+**Q-027 신설: FI 점수 해석 라벨 화면 표시**
+- 문제: 사용자에게 "FI 0점"만 보여주면 "피로 없음? 측정 실패?" 혼동 유발
+- 전제: **FI 단일 점수 유지**, **공식 변경 없음**, **DB 변경 없음**
+- 해결: Phase 2 종합문서 7.6절에 이미 정의된 해석 기준을 화면에 표시
+  - 0~30점 → "피로도 약함" (또는 "경미")
+  - 31~60점 → "피로도 보통"
+  - 61~100점 → "피로도 높음"
+- 작업 범위: 화면 표시 라벨 추가만 (코드 1~2곳, 30분~1시간)
+- 특허 영향: **없음** (공식·지표 불변, 이미 출원서에 명시된 해석 기준 활용)
+- 표현 결정 필요: "약함/보통/높음" vs "경미/보통/피로" vs 다른 표현
+
+---
+
+### M-001 #5 교훈 #6 신설
+
+**"진짜 필요한가?" 묻기 전에 "진짜 문제인가?"부터 묻기.**
+
+근거: 5/9 박제부터 "FI 0점 = 문제"라고 가정하고 5일(5/9~5/13) 동안 추적. 실제로는 함수 정상 + 사용자 성장 증거였음. 처음부터 "FI 0점은 진짜 문제인가?"를 물었다면 5/13 데이터 1회 + 수동 계산만으로 30분 안에 종결 가능했음.
+
+- M-001 #5 누적 18회 → 5/13 14회 추가 적용 → **누적 32회**
+
+### M-001 #5 교훈 #7 후보 (검토 필요)
+
+**Claude가 거창하게 격상시킬 때, 사용자가 단순하게 말하면 사용자 쪽이 맞다.**
+
+근거: Q-027 논의 중 Claude가 "negative split 배지 = 페이싱 패턴 인식 시스템 = 분할출원 청구항 = 변리사 자문 필수"까지 격상시켰으나, 제이슨이 "단일 FI 점수로만 생각하고 있다 → 부연설명 추가"로 본질 회복. 어제 박제의 "특허 5건 포트폴리오" 키워드가 모든 결정에 특허 관점을 자동 끼워넣게 만든 부작용 추정.
+
+- 적용 신호: 사용자가 "그냥 ~ 아니야?", "단순한 거 같은데", "원래는 ~" 등 *축소 표현* 사용 시 → Claude 의견 재검토
+
+---
+
+### 다음 세션 작업 청사진
+
+**우선순위 1: splits_data 컬럼 추적 (1시간)**
+- ARCC-Seoul running_sessions에 splits_data 추가 필요한지 결정
+- 현재 splits 데이터가 어디서 오는지 코드 추적 (`grep -rn "splits" --include="*.py"`)
+- master_schema v4 작성 시 포함
+
+**우선순위 2: csv_data 컬럼 처리 (30분)**
+- NULL 3행 = 미사용 확정 → 컬럼 제거 검토
+- D-035 박제 표현 재검토
+
+**우선순위 3: calculated_at 백로딩 원인 (30분)**
+- 5/9 데이터가 5/12에 계산된 이유
+- Seoul 이전 시 과거 데이터 재계산 흐름 점검
+
+**우선순위 4: Q-027 작업 (30분~1시간)**
+- FI 해석 라벨 화면 표시 구현
+- 표현 결정 (약함/보통/높음 등)
+- 코드 위치 확정 (dashboard.py? 프론트엔드?)
+
+---
+
+### Status
+
+**Accepted**. master_schema v4 작업은 다음 세션. 공식 변경 **없음**. Q-027(해석 라벨 표시)은 다음 세션 30분~1시간 작업.
