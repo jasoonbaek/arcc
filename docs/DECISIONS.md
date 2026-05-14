@@ -2794,9 +2794,53 @@ def _calc_fi(splits, summary):
 - FI 해석 라벨 화면 표시 구현
 - 표현 결정 (약함/보통/높음 등)
 - 코드 위치 확정 (dashboard.py? 프론트엔드?)
-
 ---
+### Status
+**Accepted**. master_schema v4 작업은 다음 세션. 공식 변경 **없음**. Q-027(해석 라벨 표시)은 다음 세션 30분~1시간 작업.
+---
+
+## D-042: Supabase Data API GRANT 정책 변경 메일 수신 (5/14)
+
+**Status**: Accepted (정보 박제)
+**Date**: 2026-05-14 (KST, 목요일 점심 13:04)
+**Related**: D-040 발견 ① (GRANT 누락 5/10 부메랑), master_schema v3
+
+### Context
+
+5/14 점심시간 Supabase 측 메일 수신: "Data API access changes May 30 for all new projects".
+ARCC 계정에 Data API 사용 프로젝트 2개 감지됨 (ARCC-Seoul + Mumbai 추정).
+
+### 메일 요약
+
+- **5/30부터**: 새 Supabase 프로젝트의 public 스키마 테이블이 Data API에 자동 노출 안 됨
+- **10/30부터**: 모든 기존 프로젝트에도 적용 (강제 시행)
+- 명시적 GRANT 없으면 supabase-js, PostgREST, GraphQL 접근 불가
+- 기존 테이블의 현재 권한은 유지됨 (10/30 전까지)
+
+### D-040 발견 ①과의 연결
+
+5/12 D-040 발견 ①: "GRANT 누락(5/10 부메랑)"으로 master_schema v3에 GRANT 11개 추가.
+→ 이번 Supabase 정책 변경은 **그 부메랑이 외부 표준이 되는** 변화.
+→ ARCC가 5/12에 선제적으로 처리한 것이 *우연이 아닌 정합성 있는 방향*임을 외부 확증.
+
+### 영향 평가
+
+**즉시 영향 (5/30~10/30)**: 없음
+- ARCC-Seoul은 *기존 프로젝트*라 5/30 적용 대상 아님
+- 현재 GRANT 11개 적용 상태 유지
+
+**10/30 영향 (정식 런칭 9~10월 직후)**: 있음
+- 9~10월 정식 런칭과 시점 겹침
+- 그 시점에 새 테이블 추가 시 GRANT 명시 *의무*
+- master_schema v4 작업 시 GRANT 명시 *기본 표준*으로 포함
+
+### 운영 영향 추적 (Q 신설 별도)
+
+- master_schema v4 작업 시 GRANT 명시 표준 적용
+- 9~10월 런칭 시점 운영 매뉴얼에 "새 테이블 = GRANT 필수" 명문화
+- 베타 단계(6/1~) dogfooding 중 영향 없음 확인
+- 별도 Open Question 신설은 D-043 또는 차후 정리 시 통합
 
 ### Status
 
-**Accepted**. master_schema v4 작업은 다음 세션. 공식 변경 **없음**. Q-027(해석 라벨 표시)은 다음 세션 30분~1시간 작업.
+**Accepted** (정보 박제). 즉시 작업 없음.
