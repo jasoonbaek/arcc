@@ -3823,3 +3823,135 @@ D-046 청사진 (3건 → 코드 작업 1건 + 단순 작업 2건):
 ### Status
 
 **Accepted**. D-041 오진 3건 모두 정정 완료. Q-033 결정 (옵션 A+B+C 통합). M-001 #9 정량 효과 검증 (작업 효율 3.4배, 오진율 33%→0%).
+---
+
+## D-048: master_schema v4 작업 본질 재정의 — 4건 → 1건 축소
+
+**Status**: Accepted
+**Date**: 2026-05-15 (KST, 금요일 오후)
+**Session Type**: 청사진 정정 + M-001 #9 3회차 적용
+**Related**: D-040 (master_schema v3), D-042 (GRANT 정책), D-046 (splits_data 정정), D-047 (Q-033 결정)
+
+---
+
+### Context
+
+D-046/D-047 박제 직후 다음 세션 작업 청사진 1번 "master_schema v4 작업 (1.5~2시간)" 진입 전 M-001 #9 검토. 결과: *원래 v4 작업의 75%가 불필요*. 청사진 정정 박제.
+
+### Decision
+
+**master_schema v4 작업 = 단일 ALTER TABLE 1건. 원래 4건 중 3건은 이미 종결되거나 불필요. 1.5~2시간 → 10~20분 작업으로 축소.**
+
+---
+
+### v4 작업 본질 재정의
+
+#### 원래 청사진 (D-046/D-047, 4건)
+
+| 작업 | 출처 | 상태 |
+|---|---|---|
+| splits_data 컬럼 추가 | D-041 발견 ⑨ | ❌ 불필요 |
+| csv_data 컬럼 처리 | D-041 발견 ④ | ❌ 불필요 |
+| GRANT 표준화 | D-042 | ❌ 이미 v3 포함 |
+| resting_hr_measured_at 추가 | D-047 Q-033 옵션 C | ✅ 필요 |
+
+#### 정정 사유 (M-001 #9 검토 결과)
+
+**① splits_data 추가 = 불필요**
+- D-037 Q-022에서 splits_data 컬럼 *제거* 결정 명시 (master_schema v3 line 93~96)
+- splits 데이터는 *별도 splits 테이블*에 정상 저장 중 (D-046)
+- 추가하면 *D-037 결정 위반*
+
+**② csv_data 처리 = 불필요**
+- D-037 Q-022에서 csv_data *유지* 결정 (특허/디버깅 추적성)
+- D-041 발견 ④ "NULL 3행 = 미사용 추정" → 오진 (D-046에서 정정)
+- 제거 X, 처리 X, *유지*가 정답
+
+**③ GRANT 표준화 = 이미 v3 포함**
+- master_schema v3 (5/12, 671줄)에 GRANT 11개 *명시 포함*
+- D-042 영향 평가: "ARCC-Seoul은 기존 프로젝트, 5/30 적용 대상 아님, 현재 GRANT 11개 유지"
+- 별도 v4 작업 *원래 불필요*
+
+**④ resting_hr_measured_at 추가 = 유일하게 필요**
+- D-047 Q-033 옵션 C 결정 (안정시 심박 측정일 추적)
+- 위치: `health_records` 테이블 또는 `users` 테이블
+- 작업: `ALTER TABLE ... ADD COLUMN resting_hr_measured_at TIMESTAMPTZ`
+
+#### 정정 후 청사진 (1건)
+
+```sql
+-- master_schema v4: resting_hr_measured_at 컬럼 추가
+ALTER TABLE health_records 
+ADD COLUMN IF NOT EXISTS resting_hr_measured_at TIMESTAMPTZ;
+
+-- 또는 users 테이블에 추가 (어느 테이블이 적합한지 결정 필요)
+-- ALTER TABLE users 
+-- ADD COLUMN IF NOT EXISTS resting_hr_measured_at TIMESTAMPTZ;
+```
+
+→ **1.5~2시간 → 10~20분 작업** (테이블 위치 결정 + SQL 실행 + master_schema.sql 업데이트)
+
+---
+
+### M-001 #9 3회차 적용 사례
+
+#### 1회차 (D-046)
+- 작업 ① splits_data 추적
+- 검토 5분 → D-037 발견 → 박제 작업 종결
+- 시간 절감: 1시간 → 47분
+
+#### 2회차 (D-047)
+- 작업 ② calculated_at + 작업 ③ Q-033
+- 검토 시 *HRR 시스템 이미 작동 확인* → 표기 강화로 본질 재정의
+- 시간 절감: 30~60분 → 25분 (Q-033 결정)
+
+#### 3회차 (본 박제, D-048)
+- master_schema v4 작업 청사진
+- 검토 시 *4건 중 3건 불필요* 확인
+- 시간 절감: 1.5~2시간 → 10~20분 (예상)
+
+**누적 절감**: 어제~오늘 *4시간+ 작업이 1시간+로 축소* (75% 감소).
+
+#### M-001 #9 작동 강화 패턴
+
+```
+청사진 진입 전 검토 → 발견 → 작업 본질 재정의 → 박제
+↑
+이 검토 단계가 *작업 자체보다 가치 큼*
+```
+
+---
+
+### 다음 세션 작업 청사진 (정정 후)
+
+#### 우선순위 1 (코드 작업, 단독 세션 권장)
+- **master_schema v4 작업** (10~20분, 1건 축소됨)
+  - `resting_hr_measured_at` 컬럼 추가
+  - 테이블 위치 결정 (health_records vs users)
+  - master_schema.sql 본문 업데이트
+
+#### 우선순위 2 (Q-033 코드 작업, Replit Agent)
+- **HRR Zone 라벨 + 학술 근거 + 측정일 표기** (45~60분)
+  - 헬퍼 함수 `hrr_zone_label(percent)` 추가
+  - context_builder.py 신체정보 섹션 강화
+  - 화면 측정일 입력 필드 (선택)
+
+→ 우선순위 1 (DB) + 우선순위 2 (코드) = *합치면 1~1.5시간 단독 세션*.
+
+#### 우선순위 3 (보류 메모)
+- Q-029 정식화 시점 결정 (6/1 이후)
+- insert_session_bundle SQL 본문 (호기심, 박제 가치 낮음)
+- 새 dogfooding (5/15 또는 주말 러닝)
+
+---
+
+### M-001 #5 적용 (오늘 세션 누적)
+
+- D-048 작업 결정 시 "크메 추천?" 명시 요청 → 길 3 추천 + 솔직 점검 1회
+- 누적 46회 → **47회**
+
+### M-001 #9 누적 → **3회**
+
+### Status
+
+**Accepted**. master_schema v4 작업 본질 축소 (4건 → 1건). 다음 세션 코드 작업 = 단독 세션 1~1.5시간 예상. M-001 #9 *청사진 진입 전 검토*의 정량 효과 누적 확인.
